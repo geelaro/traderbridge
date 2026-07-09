@@ -76,6 +76,12 @@ name = "MSFT"
 active = "weekly_macd_kdj"
 monitor = []
 
+[[watchlist]]
+symbol = "DRAM"
+name = "DRAM"
+active = "daily_macd_kdj"
+monitor = []
+
 [strategy.weekly_macd]
 macd_fast = 12
 macd_slow = 26
@@ -170,13 +176,11 @@ max_bytes = 10485760
 backup_count = 3
 
 [alerts]
-# RiskAlerter thresholds — consumed by live/risk_alerts.py:AlertConfig.
-# Use empty section + defaults if you don't want to override.
 enabled = true
 risk_light_enabled = true
 vix_spike_enabled = true
-vix_alert_threshold = 30.0
-vix_clear_threshold = 27.0
+vix_alert_threshold = 30
+vix_clear_threshold = 27
 position_alert_enabled = true
-position_distance_alert_pct = 5.0
-position_distance_clear_pct = 7.0
+position_distance_alert_pct = 5
+position_distance_clear_pct = 7
