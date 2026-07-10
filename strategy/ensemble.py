@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from strategy.base import BaseStrategy, StrategyParams
+from .base import BaseStrategy, StrategyParams, compute_atr
 from utils.market_state import MarketStateClassifier, MarketRegime, Volatility
 
 
@@ -160,13 +160,21 @@ class StrategyEnsemble(BaseStrategy):
         # Carry forward ATR from first member that has it (from cached df_sig)
         for df_sig in member_dfs:
             if "ATR" in df_sig.columns:
-                result["ATR"] = df_sig["ATR"]
+                result["ATR"] = self._align_to_daily(df_sig["ATR"], df.index, fill_value=0)
                 break
         else:
-            from strategy.base import compute_atr
             result["ATR"] = compute_atr(result, 14)
 
         return result
+
+    @staticmethod
+    def _align_to_daily(series: pd.Series, index: pd.Index, fill_value: float = 0) -> pd.Series:
+        """Align a member output series to the ensemble's daily index.
+
+        Weekly members return sparse weekly indices.  Forward-fill their latest
+        known value so downstream sizing sees a usable ATR on non-Friday bars.
+        """
+        return series.reindex(index, method="ffill").fillna(fill_value)
 
     # -- sizing -------------------------------------------------------------
 

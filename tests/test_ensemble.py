@@ -6,6 +6,7 @@ import pytest
 from strategy.ensemble import StrategyEnsemble, EnsembleParams
 from strategy.turtle_trading import TurtleTrading
 from strategy.bollinger_mean_reversion import BollingerMeanReversion
+from strategy.weekly_macd import WeeklyMACD
 from utils.market_state import MarketRegime, Volatility
 
 
@@ -103,3 +104,15 @@ class TestEnsembleWithWeekly:
         ens = StrategyEnsemble(members, proxy_df)
         result = ens.calculate_indicators(stock_df, df_weekly=weekly)
         assert "Signal" in result.columns
+
+    def test_weekly_member_atr_is_aligned_to_daily_index(self, stock_df, proxy_df):
+        members = [
+            (WeeklyMACD(), "trend"),
+            (TurtleTrading(), "trend"),
+        ]
+        ens = StrategyEnsemble(members, proxy_df)
+        result = ens.calculate_indicators(stock_df)
+
+        warmed = result["ATR"].iloc[ens.min_bars:]
+        assert not warmed.isna().any()
+        assert (warmed > 0).all()

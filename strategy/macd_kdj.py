@@ -186,10 +186,13 @@ class MACDKDJStrategy(ChandelierTrailingExit, BaseStrategy):
         i: int,
         entry_price: float,
         highest_since_entry: float,
+        lowest_since_entry: Optional[float] = None,
         position: Optional[Dict] = None,
     ) -> Tuple[bool, str]:
         if self.params.use_atr_stop:
-            exit_flag, reason = self._chandelier_exit(df, i, highest_since_entry)
+            exit_flag, reason = self._chandelier_exit(
+                df, i, highest_since_entry, lowest_since_entry, position
+            )
             if exit_flag:
                 return True, reason
         if int(df["Signal"].iloc[i]) == -1:
