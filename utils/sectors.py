@@ -21,6 +21,9 @@ DEFAULT_SECTORS: dict[str, str] = {
     "ORCL": "Technology",
     "CRM": "Technology",
     "ADBE": "Technology",
+    # Technology — Semiconductor ETFs
+    "SMH": "Technology",
+    "DRAM": "Technology",
     # Automotive / EV
     "TSLA": "Automotive",
     "F": "Automotive",

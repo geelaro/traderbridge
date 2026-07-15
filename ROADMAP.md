@@ -492,6 +492,76 @@
 - 出场保持即时响应
 - 新增 pending_orders 表 + post-close / pre-market 双时点 cron / daemon
 
+**2026-07-15 复评**: 再次确认暂不修。当前不跑 `live_trader.py` 自动化 daemon
+(手动经纪商下单为主), 触发场景 1-4 均未激活。维持"已立项, 暂不修"状态,
+下方阶段八按此前提重新排定优先级。
+
+---
+
+## 阶段八：组合结构与决策体验（第 12 周+）
+
+> 2026-07-15 立项。前提：当前不跑 `live_trader.py` 自动化 daemon，手动经纪商
+> 下单为主 → 实盘自动化相关项（P2-1 信号时点对齐、Sec-1 部分内容）降权，
+> 优先做"不依赖实盘自动化也能立即受益"的组合结构和决策体验改进。
+>
+> 执行顺序：**W-1 → D-1 → Ops-1 → Sec-1 → CI-1**（长期方向见既有"阶段七"，
+> 未新增独立编号）
+
+```
+阶段八  组合与体验   第 12 周+  ███░░░░░░░░░░░   (1/5 项, W-1 已决策)
+```
+
+### W-1 Watchlist 组合结构优化
+
+- [x] 分析完成 (2026-07-15) — **决策: 维持现状, 不修改 watchlist.toml**
+- **文件:** `watchlist.toml` `analysis/correlation_analysis.py` `analysis/concentration.py` `analysis/what_if.py` `utils/sectors.py` — 新增 `scripts/portfolio_diversification_audit.py` (可复现审计工具, 参照 `strategy_fit_audit.py` 模式)
+- **问题:** 当前 13 个观察标的 (AAPL/NVDA/TSLA/GOOG/AMZN/MU/INTC/ORCL/QQQ/SPY/SMH/MSFT/DRAM) 集中在科技/半导体, 相关性聚类此前已揭示"12 持仓实际只是 1.01 个独立赌注"(见阶段五 Bonus 项); 组合层面的分散化收益预期大于继续堆策略指标
+- **方法论调整:** 原计划用 Brinson 拆行业暴露, 改用 `analysis/concentration.py` 的 `sector_hhi`/`sector_exposure` — Brinson 需要已实现收益 + 基准分解, 回答"为什么跑赢/跑输", 不适合静态持仓快照问题
+- **发现:**
+  1. Effective Bets = **1.10 / 13**(PCA 第一主成分解释 95.2% 方差); 层次聚类只抓到一组紧密簇 `MU/QQQ/SPY/SMH/DRAM` (MU↔DRAM corr=0.940), 其余 8 个标的各自独立成簇但仍共享同一市场因子
+  2. `utils/sectors.py` 缺 SMH/DRAM 的 ETF 映射, 修复后 (已提交) Technology 暴露从 61.5% 修正为 **76.9%**, 行业 HHI 从 4320 修正为 **6213** (高度集中)
+  3. What-If: 半导体簇减半仓 + 加 TLT/GLD/XLE/IWM → VaR(95%,1d) 3.07%→1.37%, 行业HHI 6213→4349 (仍 >2500, 减仓力度不够彻底分散)
+- **决策 (2026-07-15):** 用户复核后选择维持现状, 不改 `watchlist.toml`。已完成的 `utils/sectors.py` 修复保留 (数据质量修正, 与是否调整持仓无关)。审计工具留存, 未来标的增减或定期复核时重跑 `scripts/portfolio_diversification_audit.py`
+
+### D-1 Dashboard 决策摘要化
+
+- [ ] 未开始
+- **文件:** 新增聚合层 (暂定 `dashboard/decision_summary.py`) + `dashboard/main.py`
+- **问题:** Dashboard 功能齐全但偏"模块陈列", 缺一句话结论: 今日该不该交易/为什么/风险变化多少/信号被拒了几个
+- **方案:** 在现有"今日"header (风险灯 + 信号 + 持仓) 上方加一张决策摘要卡:
+  - 一句话结论 (今日该不该交易)
+  - 理由行: 风险灯状态 + regime、被拒信号数 (来源 `RiskController.reason_if_blocked` + `decision_history.signal_ignored`)、组合风险较昨日 Δ (来源 `risk_analytics` / `what_if`)
+  - 每行可展开跳转到对应已有 tab, 不重做 tab 结构, 只加聚合/摘要层
+- **依赖:** 无, 全部复用现有模块
+
+### Ops-1 数据源可观测性
+
+- [ ] 未开始
+- **文件:** `data/sources.py` `data/provider.py` `data/quality.py` `dashboard/ops.py`
+- **问题:** 已有多源 fallback + 拆股修正 + drift warning, 但故障是否发生/ 哪个源在退化不可见, 也没有面板
+- **方案:**
+  1. 每个数据源加健康状态 (成功率 / 最近失败时间 / 冷却状态)
+  2. 失败冷却机制, 避免对已知故障源反复重试
+  3. Dashboard 接入数据质量报告 (复用已有 `data/quality.py`)
+  4. `splits.json` 更新后自动检测 + 提醒 force_refresh / 清缓存
+
+### Sec-1 实盘执行安全增强
+
+- [ ] 未开始 — **优先级降级**: 无 daemon 运行时非阻塞, 可延后或跳过
+- **文件:** `broker/base.py` (新增 `list_open_orders`) `live/kill_switch.py` `live/order_manager.py`
+- **方案:** 取消未成交挂单 / 订单幂等 / 成交后对账 / 券商连接中断恢复 / 异常重试节流。`list_open_orders` 补齐后 Kill Switch 可先撤挂单再平仓
+- **备注:** 与 P2-1 的 `pending_orders` 状态机有设计耦合 — 若未来两者都要做, 建议先合并设计挂单状态机 schema, 避免两套"挂单"概念打架
+
+### CI-1 测试与 CI 加固
+
+- [ ] 未开始 — 优先级最低, 与功能优先级正交, 可随时插入
+- **方案:**
+  - import-linter 或自写层级依赖检查, 防 `analysis`/`strategy` 误导入 `live`/`broker`
+  - dashboard smoke test
+  - 数据源 mock contract tests
+  - migration schema tests
+  - golden test 自动说明生成, 避免数值更新变成盲改
+
 ---
 
 > 此文档将随开发进度持续更新。每完成一项，勾选其 checkbox 并在进度表中记录。
