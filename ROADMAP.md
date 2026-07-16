@@ -508,7 +508,7 @@
 > 未新增独立编号）
 
 ```
-阶段八  组合与体验   第 12 周+  ███░░░░░░░░░░░   (1/5 项, W-1 已决策)
+阶段八  组合与体验   第 12 周+  ██████░░░░░░░   (2/5 项, W-1 已决策 / D-1 已完成)
 ```
 
 ### W-1 Watchlist 组合结构优化
@@ -525,14 +525,15 @@
 
 ### D-1 Dashboard 决策摘要化
 
-- [ ] 未开始
-- **文件:** 新增聚合层 (暂定 `dashboard/decision_summary.py`) + `dashboard/main.py`
+- [x] 完成 (2026-07-15)
+- **文件:** 新增 `dashboard/decision_summary.py` (`build_decision_summary` 纯计算 + `render_decision_summary` 渲染) + `dashboard/main.py` (接在 `render_risk_light` 之前) + `tests/test_decision_summary.py` (16 用例)
 - **问题:** Dashboard 功能齐全但偏"模块陈列", 缺一句话结论: 今日该不该交易/为什么/风险变化多少/信号被拒了几个
-- **方案:** 在现有"今日"header (风险灯 + 信号 + 持仓) 上方加一张决策摘要卡:
-  - 一句话结论 (今日该不该交易)
-  - 理由行: 风险灯状态 + regime、被拒信号数 (来源 `RiskController.reason_if_blocked` + `decision_history.signal_ignored`)、组合风险较昨日 Δ (来源 `risk_analytics` / `what_if`)
-  - 每行可展开跳转到对应已有 tab, 不重做 tab 结构, 只加聚合/摘要层
-- **依赖:** 无, 全部复用现有模块
+- **实现落地时与原方案的偏差** (调研发现原方案两处引用不成立, 详见实现过程):
+  1. **被拒信号数据源写错**: `RiskController` 没有 `reason_if_blocked`; 真正的 `(bool,reason)` 门禁是 `utils/signal_gate.py` 的 `SignalGate.allow_buy/allow_sell`, 但此前只有 `live_trader.py` 的实盘循环调用过, Dashboard 从未跑过。`decision_history.signal_ignored` 也是零调用点的死记录类型。
+     **v1 范围**: 只跑 `PAUSE_*` 和 `RANGING_BLOCK_*`/`TRENDING_BLOCK_*` 两类判定 (不需要 qty)。`EXPOSURE_CAP_EXCEEDED` (需要真实下单量) 和 `ORPHAN_BUY_BLOCKED` (live_trader 专属概念) 明确排除, 假设持仓语境下没有真实数据支撑, 不假装覆盖。
+  2. **风险较昨日 Δ 没有持久化基础**: `risk_state` 表原本只存 `day_start_equity`/`peak_equity` 等交易状态。用户确认方案: **Dashboard 直接写** — 复用 `risk_state` 现成的 key/value 结构, 写入 `risk_snapshot:<date>` JSON, 不新增表、不需要 schema migration。理由: 这是只读分析缓存, 不是仓位/订单等交易执行状态, 不落入 AGENTS.md "dashboard 不能直接写新表"规则要防的那类风险。
+- **验证**: 1251 个已有测试全绿 (无回归) + 16 个新测试 (`_verdict` 5 分支 / `_rejected_signals` regime 拦截 / `_risk_delta` 快照 round-trip) + 对真实 `watchlist.toml` 跑通完整链路 (6 信号中 2 个被 regime 门禁真实拦截, sector_hhi=5555 与 W-1 结论吻合) + Streamlit server 启动无异常。**未验证**: 浏览器实际渲染效果 — 环境无 `chromium-cli`/`playwright`, 未截图确认, 留给用户目测复核。
+- **一句话结论算法**: `trading_paused` → 🛑 已暂停; `risk_level==RED` → 🔴 不建议开仓; 无信号 → ⚪; 信号全被拒 → 🟡; 否则 → 🟢 可正常交易 + N 个可执行信号
 
 ### Ops-1 数据源可观测性
 

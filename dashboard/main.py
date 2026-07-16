@@ -13,6 +13,7 @@ from data import DataProvider
 from data.cache import CacheManager
 from strategy import STRATEGY_MAP
 
+from dashboard.decision_summary import build_decision_summary, render_decision_summary
 from dashboard.signals import render_market_state, render_todays_signals, render_risk_light, render_signal_detail, render_position_watch, render_alert_history
 from dashboard.single_backtest import render_single_backtest
 from dashboard.portfolio_backtest import render_portfolio_backtest, render_monte_carlo
@@ -67,6 +68,16 @@ def main():
 
     provider = get_provider()
     cache = get_cache()
+
+    # -------------------------------------------------------------------
+    # Decision summary — one-glance "今日该不该交易/为什么" card, sits
+    # above the risk light. Aggregates risk light + regime + today's
+    # signals + gate-rejected signals + risk-vs-yesterday delta; see
+    # dashboard/decision_summary.py module docstring for v1 scope notes.
+    # -------------------------------------------------------------------
+
+    summary = build_decision_summary(config, target_date, provider, cache)
+    render_decision_summary(summary)
 
     # -------------------------------------------------------------------
     # Market risk light — SPY MA200 + ADX + VIX → 🟢/🟡/🔴 with regime tag
