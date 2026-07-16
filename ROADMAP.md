@@ -508,7 +508,7 @@
 > 未新增独立编号）
 
 ```
-阶段八  组合与体验   第 12 周+  █████████░░░░   (3/5 项, W-1 已决策 / D-1 / Ops-1 已完成)
+阶段八  组合与体验   第 12 周+  ████████████░   (4/5 项, W-1 已决策 / D-1 / Ops-1 / CI-1 已完成 / Sec-1 降级搁置)
 ```
 
 ### W-1 Watchlist 组合结构优化
@@ -557,13 +557,13 @@
 
 ### CI-1 测试与 CI 加固
 
-- [ ] 未开始 — 优先级最低, 与功能优先级正交, 可随时插入
-- **方案:**
-  - import-linter 或自写层级依赖检查, 防 `analysis`/`strategy` 误导入 `live`/`broker`
-  - dashboard smoke test
-  - 数据源 mock contract tests
-  - migration schema tests
-  - golden test 自动说明生成, 避免数值更新变成盲改
+- [x] 完成 (2026-07-16)
+- **文件:** 新增 `tests/test_layer_boundaries.py` (4 用例) + `tests/test_dashboard_smoke.py` (19 用例) + `tests/test_source_contract.py` (43 用例) + `tests/test_cache_migrations.py` (6 用例) + `scripts/check_golden_drift.py`。`.github/workflows/ci.yml` **未改动**——新测试文件在 `tests/` 下自动被现有 `pytest tests/` 步骤覆盖, 不需要新增 CI 步骤
+- **实现落地时与原方案的偏差**:
+  1. **自写层级检查, 不引入 import-linter 依赖** — AGENTS.md 的规则里有"broker 值类型 vs broker 实现类"这种细粒度区分, 标准 import-linter contract 类型表达不了, 用现成工具反而要多绕一层配置 DSL。用 `ast`（不是正则/grep）扫描 import 语句和 `.submit_order` 调用点——纯文本 grep 会把 `live/decision_logger.py`/`broker/mock.py` 里文档字符串中提到"submit_order"的地方也算违规（这两处 AGENTS.md 原始 grep 命令同样会误报, `ast.walk()` 只看真实语法节点, 不看字符串字面量), 天然规避这个坑。
+  2. **dashboard smoke test 明确限定范围** — 只做了 (a) 全部 16 个子模块的 import 冒烟 + (b) `render_decision_summary`/`render_ops`/`render_risk_light` 三个高频函数的 bare-mode 调用冒烟（复用 D-1/Ops-1 已验证过的"无 ScriptRunContext 只警告不报错"结论）。`single_backtest`/`portfolio_backtest`/`factor_attribution`/`brinson_attribution`/`kill_switch` 等每个都需要独立的 broker/回测年数/选中标的上下文, 未覆盖, 留白不假装做完。
+  3. **golden drift 脚本不接入 CI 门禁** — 定位是"我怀疑该更新黄金值了"时用的诊断工具（仿 `scripts/strategy_fit_audit.py`）, 不自动改写 `tests/test_golden.py`, 也不阻断 CI——数值变更必须人工决定 + 写清楚为什么, 工具只负责把"变了什么"摆清楚。
+- **验证**: 1341 个测试全绿 (较 CI-1 开始前净增 72, 无回归) + 故意在 `analysis/` 临时注入 `import live` 违规, 确认 layer-boundary 测试真的会失败并精确报出文件:行号, revert 后确认恢复绿——不是摆设。`check_golden_drift.py` 实跑一遍, 8 个策略 × fixed_capital/risk_budget 两种模式全部"无漂移"（本次没有改动任何策略计算逻辑, 符合预期）。
 
 ---
 
