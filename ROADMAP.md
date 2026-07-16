@@ -508,7 +508,7 @@
 > 未新增独立编号）
 
 ```
-阶段八  组合与体验   第 12 周+  ██████░░░░░░░   (2/5 项, W-1 已决策 / D-1 已完成)
+阶段八  组合与体验   第 12 周+  █████████░░░░   (3/5 项, W-1 已决策 / D-1 / Ops-1 已完成)
 ```
 
 ### W-1 Watchlist 组合结构优化
@@ -537,14 +537,16 @@
 
 ### Ops-1 数据源可观测性
 
-- [ ] 未开始
-- **文件:** `data/sources.py` `data/provider.py` `data/quality.py` `dashboard/ops.py`
+- [x] 完成 (2026-07-16)
+- **文件:** 新增 `data/source_health.py` (`record_fetch_result` / `is_in_cooldown` / `source_health_report` / `check_splits_changed`) + 改 `data/cache.py` (migration v4: `source_health` 表 + `StateStore.record_source_health`/`get_last_source_failure`/`get_source_health`) + 改 `data/provider.py` (`_fetch_from_sources` 接入 cooldown 判定与健康记录) + 改 `dashboard/ops.py` (两个新 expander + splits 提醒) + `tests/test_source_health.py` (18 用例)
 - **问题:** 已有多源 fallback + 拆股修正 + drift warning, 但故障是否发生/ 哪个源在退化不可见, 也没有面板
-- **方案:**
-  1. 每个数据源加健康状态 (成功率 / 最近失败时间 / 冷却状态)
-  2. 失败冷却机制, 避免对已知故障源反复重试
-  3. Dashboard 接入数据质量报告 (复用已有 `data/quality.py`)
-  4. `splits.json` 更新后自动检测 + 提醒 force_refresh / 清缓存
+- **实现落地时与原方案的偏差** (调研发现原方案假设不成立, 详见实现过程):
+  1. **"失败冷却机制"此前名不副实**: `DataProvider._failed_sources` 是纯内存、只增不减的会话内熔断, 每次新建 `DataProvider()`（包括每次 Streamlit rerun）就清零, 起不到"冷却"的观测价值。新的 `is_in_cooldown` 是持久化、真正随时间过期的时间窗口判定（`source_health` 表按 `(source,date)` 记 success/failure 计数 + `last_failure_ts`）, 跨 rerun/跨进程一致。旧的 `_failed_sources` 集合作为同 tick 内的快速短路保留, 不冲突。
+  2. **`data/quality.py` 复用的是函数本身, 不是现成集成** — 此前零调用点。接入时发现 `quality_report(df)` 依赖 `flag_missing`/`flag_price_jumps`/`flag_non_trading` 先跑过打标列, 直接传原始 df 会静默返回全 `None`（原方案没提到这个前置步骤）。
+  3. **没有用 `ops_log`** — 它是交易语义表 (`gate_reject`/`risk_reject`/`trading_paused`), 数据源健康事件语义不搭, 改用新表。
+  4. **`splits.json` 变更检测只做提醒, 不自动生效** — `_US_SPLITS` 是模块级常量, 检测到变更只能提示"需重启进程 + force_refresh", 不会自动重载或触发批量重拉（那是破坏性操作, 需人工确认）。
+- **高风险改动的安全设计**: `_fetch_from_sources` 是 `daily.py`/`live_trader.py`/Dashboard 每次 render 都会走的热路径, 健康记录/冷却查询全部包 `try/except`, 任何异常都不能影响实际取数 — 专门写了 `test_cache_write_failure_does_not_break_fetch` 验证这条安全属性。
+- **验证**: 1269 个测试全绿 (无回归, 较 D-1 时的 1251 净增 18) + 对真实 `watchlist.toml`/生产 DB 跑通 `render_ops`/`source_health_report`, 真实抓到 sina_us/tencent/yahoo_chart 的成功率与失败详情。浏览器渲染效果未截图确认 (环境无 chromium-cli/playwright)。
 
 ### Sec-1 实盘执行安全增强
 

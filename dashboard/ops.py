@@ -1,22 +1,39 @@
-"""Ops health, sector chart, and live trade history."""
+"""Ops health, sector chart, live trade history, and data-layer observability."""
 
 from collections import Counter
 
+import pandas as pd
 import streamlit as st
 
 import utils
 from utils import get_logger
 from utils.sectors import get_sector
+from data.quality import flag_missing, flag_non_trading, flag_price_jumps, quality_report
+from data.source_health import check_splits_changed, source_health_report
 
 import matplotlib.pyplot as plt
 
 logger = get_logger("dashboard.ops")
 
 
-def render_ops(config, cache):
+def render_ops(config, cache, provider=None):
+    _check_splits_reminder(cache)
     _render_sector_chart(config)
     _render_live_trades(cache)
     _render_ops_health(cache)
+    _render_source_health(cache)
+    if provider is not None:
+        _render_data_quality(config, provider)
+
+
+def _check_splits_reminder(cache):
+    try:
+        msg = check_splits_changed(cache)
+    except Exception:
+        logger.debug("splits.json 变更检测失败", exc_info=True)
+        msg = None
+    if msg:
+        st.warning(f"⚠ {msg}")
 
 
 def _render_sector_chart(config):
@@ -133,3 +150,67 @@ def _render_ops_health(cache):
             st.dataframe(rows, use_container_width=True, hide_index=True)
         else:
             st.info("暂无运行事件")
+
+
+def _render_source_health(cache):
+    with st.expander("数据源健康", expanded=False):
+        try:
+            report = source_health_report(cache, days=7)
+        except Exception:
+            logger.warning("数据源健康报告获取失败", exc_info=True)
+            st.info("数据不可用")
+            return
+
+        sources = report.get("sources", [])
+        if not sources:
+            st.info("近 7 天无数据源调用记录")
+            return
+
+        rows = []
+        for s in sources:
+            rate = s["success_rate"]
+            rows.append({
+                "数据源": s["source"],
+                "成功率 (7d)": f"{rate:.0%}" if rate is not None else "—",
+                "成功/失败": f"{s['success_count']}/{s['failure_count']}",
+                "最近失败时间": s["last_failure_ts"] or "—",
+                "最近失败详情": s["last_failure_detail"] or "—",
+                "冷却中": "是" if s["in_cooldown"] else "否",
+            })
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+
+
+def _render_data_quality(config, provider):
+    with st.expander("数据质量 (近90天)", expanded=False):
+        symbols = [item["symbol"] for item in config.get("watchlist", [])]
+        if not symbols:
+            st.info("watchlist 为空")
+            return
+
+        end = pd.Timestamp.today()
+        start = (end - pd.DateOffset(days=90)).strftime("%Y-%m-%d")
+        rows = []
+        for sym in symbols:
+            try:
+                df = provider.get_daily(sym, start=start, end=end.strftime("%Y-%m-%d"))
+            except Exception:
+                logger.debug("数据质量检查拉取失败: %s", sym, exc_info=True)
+                continue
+            if df is None or df.empty:
+                continue
+            df = flag_missing(df)
+            df = flag_price_jumps(df)
+            df = flag_non_trading(df)
+            report = quality_report(df)
+            rows.append({
+                "标的": sym,
+                "K线数": report["bars"],
+                "缺失%": f"{report['missing_pct']:.1f}%",
+                "异常跳空": report["price_jumps"],
+                "疑似停牌%": f"{report['non_trading_pct']:.1f}%",
+            })
+
+        if not rows:
+            st.info("无可用数据")
+            return
+        st.dataframe(rows, use_container_width=True, hide_index=True)

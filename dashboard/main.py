@@ -165,7 +165,7 @@ def main():
 
         with sub_ops:
             # Sector pie + live trade log + ops health.
-            render_ops(config, cache)
+            render_ops(config, cache, provider)
 
     # ─── 风控 ───────────────────────────────────────────────────────
     with tab_risk_top:

@@ -30,6 +30,7 @@ from .sources import (
     AKShareSource,
     CBOEVixSource,
 )
+from .source_health import is_in_cooldown, record_fetch_result
 
 logger = logging.getLogger(__name__)
 
@@ -259,6 +260,8 @@ class DataProvider:
         for source_name in priorities:
             if source_name in self._failed_sources:
                 continue
+            if self._is_source_cooling_down(source_name):
+                continue
             src = self._find_source_by_name(source_name)
             if src is None or not src.supports(symbol):
                 continue
@@ -267,15 +270,38 @@ class DataProvider:
                 df = src.fetch(symbol, start, end)
                 if df is not None and not df.empty:
                     logger.info("  → got %d bars from %s", len(df), source_name)
+                    self._record_health(source_name, success=True)
                     return df, source_name
                 # Source returned empty for recent data → stale for this session
                 if is_recent:
                     self._failed_sources.add(source_name)
-            except (ConnectionError, TimeoutError, OSError, ValueError, KeyError):
+                self._record_health(source_name, success=False, detail="empty result")
+            except (ConnectionError, TimeoutError, OSError, ValueError, KeyError) as exc:
                 logger.warning("Source %s failed for %s", source_name, symbol)
-            except Exception:
+                self._record_health(source_name, success=False, detail=str(exc)[:200])
+            except Exception as exc:
                 logger.exception("Source %s unexpected error for %s", source_name, symbol)
+                self._record_health(source_name, success=False, detail=str(exc)[:200])
         return pd.DataFrame(columns=OHLCV_COLUMNS), None
+
+    def _is_source_cooling_down(self, source_name: str) -> bool:
+        """Persisted, time-window cooldown check — see data/source_health.py.
+
+        Best-effort: a health-store read failure must never block an actual
+        data fetch, so any exception here is treated as "not cooling down".
+        """
+        try:
+            return is_in_cooldown(self.cache, source_name)
+        except Exception:
+            logger.debug("source_health cooldown check failed for %s", source_name, exc_info=True)
+            return False
+
+    def _record_health(self, source_name: str, success: bool, detail: str = "") -> None:
+        """Best-effort health record — must never break the fetch path."""
+        try:
+            record_fetch_result(self.cache, source_name, success=success, detail=detail)
+        except Exception:
+            logger.debug("source_health record failed for %s", source_name, exc_info=True)
 
     def _find_source_by_name(self, name: str) -> Optional[DataSource]:
         for src in self._sources:

@@ -235,6 +235,18 @@ class _CacheBase:
                 "CREATE INDEX IF NOT EXISTS idx_decision_type ON decision_history(decision_type)",
                 "CREATE INDEX IF NOT EXISTS idx_decision_sym  ON decision_history(symbol)",
             ]),
+            (4, [
+                """CREATE TABLE IF NOT EXISTS source_health (
+                    source              TEXT NOT NULL,
+                    date                TEXT NOT NULL,
+                    success_count       INTEGER DEFAULT 0,
+                    failure_count       INTEGER DEFAULT 0,
+                    last_failure_ts     TEXT,
+                    last_failure_detail TEXT,
+                    PRIMARY KEY (source, date)
+                )""",
+                "CREATE INDEX IF NOT EXISTS idx_source_health_date ON source_health(date)",
+            ]),
         ]
 
         for version, statements in migrations:
@@ -474,6 +486,80 @@ class StateStore(_CacheBase):
                 "SELECT value FROM risk_state WHERE key = ?", [key]
             ).fetchone()
         return row[0] if row else None
+
+    # -- source health --------------------------------------------------------
+
+    def record_source_health(self, source: str, success: bool, detail: str = "") -> None:
+        """Upsert today's (source, date) row — accumulate success/failure
+        counts. On failure, stamps last_failure_ts/detail; a success never
+        clears a prior failure record (COALESCE keeps the old value)."""
+        with self._lock:
+            self.init_schema()
+            today = pd.Timestamp.now().strftime("%Y-%m-%d")
+            fail_ts = None if success else pd.Timestamp.now().isoformat()
+            self.conn.execute(
+                """INSERT INTO source_health
+                       (source, date, success_count, failure_count, last_failure_ts, last_failure_detail)
+                   VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(source, date) DO UPDATE SET
+                       success_count = success_count + excluded.success_count,
+                       failure_count = failure_count + excluded.failure_count,
+                       last_failure_ts = COALESCE(excluded.last_failure_ts, last_failure_ts),
+                       last_failure_detail = COALESCE(excluded.last_failure_detail, last_failure_detail)
+                """,
+                [
+                    source, today,
+                    1 if success else 0,
+                    0 if success else 1,
+                    fail_ts,
+                    None if success else detail,
+                ],
+            )
+            self._commit()
+
+    def get_last_source_failure(self, source: str) -> Optional[str]:
+        """Most recent failure timestamp (ISO string) for *source*, across
+        all history — or None if it has never failed / has no record."""
+        with self._lock:
+            self.init_schema()
+            row = self.conn.execute(
+                "SELECT MAX(last_failure_ts) FROM source_health WHERE source = ?",
+                [source],
+            ).fetchone()
+        return row[0] if row and row[0] else None
+
+    def get_source_health(self, days: int = 7) -> list:
+        """Per-source success/failure counts over the last *days* days, plus
+        each source's most recent failure (unbounded by the window — a
+        cooldown-relevant failure from outside the window still matters)."""
+        with self._lock:
+            self.init_schema()
+            since = (pd.Timestamp.now() - pd.Timedelta(days=days)).strftime("%Y-%m-%d")
+            rows = self.conn.execute(
+                """SELECT sh.source,
+                          SUM(sh.success_count) AS success_count,
+                          SUM(sh.failure_count) AS failure_count,
+                          (SELECT MAX(sh2.last_failure_ts) FROM source_health sh2
+                               WHERE sh2.source = sh.source) AS last_failure_ts,
+                          (SELECT sh3.last_failure_detail FROM source_health sh3
+                               WHERE sh3.source = sh.source AND sh3.last_failure_ts = (
+                                   SELECT MAX(sh4.last_failure_ts) FROM source_health sh4
+                                       WHERE sh4.source = sh.source
+                               ) LIMIT 1) AS last_failure_detail
+                   FROM source_health sh
+                   WHERE sh.date >= ?
+                   GROUP BY sh.source
+                   ORDER BY sh.source
+                """,
+                [since],
+            ).fetchall()
+        return [
+            {
+                "source": r[0], "success_count": r[1] or 0, "failure_count": r[2] or 0,
+                "last_failure_ts": r[3], "last_failure_detail": r[4],
+            }
+            for r in rows
+        ]
 
     # -- alert history ------------------------------------------------------
 
