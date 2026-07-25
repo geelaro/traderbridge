@@ -565,6 +565,15 @@
   3. **golden drift 脚本不接入 CI 门禁** — 定位是"我怀疑该更新黄金值了"时用的诊断工具（仿 `scripts/strategy_fit_audit.py`）, 不自动改写 `tests/test_golden.py`, 也不阻断 CI——数值变更必须人工决定 + 写清楚为什么, 工具只负责把"变了什么"摆清楚。
 - **验证**: 1341 个测试全绿 (较 CI-1 开始前净增 72, 无回归) + 故意在 `analysis/` 临时注入 `import live` 违规, 确认 layer-boundary 测试真的会失败并精确报出文件:行号, revert 后确认恢复绿——不是摆设。`check_golden_drift.py` 实跑一遍, 8 个策略 × fixed_capital/risk_budget 两种模式全部"无漂移"（本次没有改动任何策略计算逻辑, 符合预期）。
 
+### 阶段八后追加: 历史信号 Tab
+
+- [x] 完成 (2026-07-25)
+- **文件:** 新增 `dashboard/signal_history.py` (`render_signal_history`) + 改 `dashboard/main.py` (研究 tab 组新增"历史信号"子 tab, 位于"信号有效性"和"历史类比"之间) + `tests/test_dashboard_smoke.py` (import 冒烟 + 1 个 render 冒烟用例)
+- **问题:** 用户想看"今日信号"的历史记录。调研发现 `render_signal_detail`("今日信号"区块) 每次调用 `daily.scan_day` 时, `SignalScanner` 已经把每次扫描结果写入 `signal_history` 表 (`data/cache.py`) —— 这个持久化本来就存在, 只是没有任何 UI 能看到, 唯一入口是 CLI `daily.py --history`。**不需要新增持久化逻辑, 纯读取现有表。**
+- **关键设计: 按 (标的, 策略, K线日期, 信号) 去重** — weekly 策略的同一次信号会在 bar 收盘前被逐日重复扫描并重复写入 (例如 QQQ 的 weekly_macd 死叉在 7/24-7/25 两天扫描中各写了一条, bar_date 相同)。直接罗列 scan_date 会把 1 次真实信号显示成多次。去重后展示"首次探测 / 最近确认 / 确认天数", 用真实生产库验证: 101 条原始非零记录 → 71 个去重后的信号事件。
+- **明确排除**: 不重新对全历史价格跑策略算信号时间线 (那是 `signal_effectiveness.py` 的 forward-return 分析在做的事, 不同问题) —— 这个 tab 只是`signal_history` 表的浏览器。
+- **验证**: 21 个 dashboard smoke 测试全绿 + 全量回归 1343 个测试全绿 (无回归) + 用真实生产 DB 手动验证去重逻辑 (QQQ 死叉正确合并为 1 行, confirmations=2)。浏览器渲染效果未截图确认 (环境无 chromium-cli/playwright, 与 D-1/Ops-1/CI-1 一致的已知限制)。
+
 ---
 
 > 此文档将随开发进度持续更新。每完成一项，勾选其 checkbox 并在进度表中记录。

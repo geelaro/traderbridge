@@ -44,6 +44,7 @@ DASHBOARD_MODULES = [
     "dashboard.risk_analytics",
     "dashboard.risk_report",
     "dashboard.signal_effectiveness",
+    "dashboard.signal_history",
     "dashboard.signals",
     "dashboard.single_backtest",
 ]
@@ -118,3 +119,23 @@ class TestRenderSmoke:
     def test_render_risk_light(self, smoke_config, smoke_provider):
         from dashboard.signals import render_risk_light
         render_risk_light(smoke_config, pd.Timestamp("2023-10-02").date(), smoke_provider)
+
+    def test_render_signal_history(self, smoke_config, temp_cache):
+        from dashboard.signal_history import render_signal_history
+
+        # Same (symbol, strategy, bar_date, signal) persisted on 3 different
+        # scan_dates — mirrors a weekly signal being re-confirmed daily until
+        # the bar rolls over. Exercises the dedup/groupby path, not just the
+        # empty-table path.
+        for scan_date in ("2023-10-01", "2023-10-02", "2023-10-03"):
+            temp_cache.save_signal(
+                scan_date=scan_date, symbol="AAA", strategy="weekly_macd",
+                bar_date="2023-09-29", signal=-1, price=101.5, atr=2.1,
+                indicators='{"MACD": -0.3}',
+            )
+        temp_cache.save_signal(
+            scan_date="2023-10-03", symbol="BBB", strategy="weekly_macd",
+            bar_date="2023-10-03", signal=1, price=50.0, atr=1.0,
+            indicators='{"MACD": 0.2}',
+        )
+        render_signal_history(temp_cache, smoke_config)

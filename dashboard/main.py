@@ -21,6 +21,7 @@ from dashboard.factor_attribution import render_factor_attribution
 from dashboard.brinson_attribution import render_brinson_attribution
 from dashboard.pnl_breakdown import render_pnl_breakdown
 from dashboard.signal_effectiveness import render_signal_effectiveness
+from dashboard.signal_history import render_signal_history
 from dashboard.historical_analog import render_historical_analog
 from dashboard.kill_switch import render_kill_switch
 from dashboard.risk_report import render_risk_report
@@ -113,9 +114,11 @@ def main():
 
     # ─── 研究 ───────────────────────────────────────────────────────
     with tab_research:
-        sub_single, sub_portfolio, sub_factors, sub_brinson, sub_signal_eff, sub_analog = \
-            st.tabs(["单标的回测", "组合回测", "因子归因",
-                     "业绩归因 Brinson", "信号有效性", "历史类比"])
+        (sub_single, sub_portfolio, sub_factors, sub_brinson, sub_signal_eff,
+         sub_signal_hist, sub_analog) = st.tabs(
+            ["单标的回测", "组合回测", "因子归因", "业绩归因 Brinson",
+             "信号有效性", "历史信号", "历史类比"]
+        )
 
         with sub_single:
             render_single_backtest(
@@ -147,6 +150,9 @@ def main():
                 selected_symbol, selected_strategy,
                 strategy_options, symbols,
             )
+
+        with sub_signal_hist:
+            render_signal_history(cache, config)
 
         with sub_analog:
             render_historical_analog(selected_symbol, target_date, provider)
