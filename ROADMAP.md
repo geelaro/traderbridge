@@ -574,6 +574,15 @@
 - **明确排除**: 不重新对全历史价格跑策略算信号时间线 (那是 `signal_effectiveness.py` 的 forward-return 分析在做的事, 不同问题) —— 这个 tab 只是`signal_history` 表的浏览器。
 - **验证**: 21 个 dashboard smoke 测试全绿 + 全量回归 1343 个测试全绿 (无回归) + 用真实生产 DB 手动验证去重逻辑 (QQQ 死叉正确合并为 1 行, confirmations=2)。浏览器渲染效果未截图确认 (环境无 chromium-cli/playwright, 与 D-1/Ops-1/CI-1 一致的已知限制)。
 
+### 阶段八后追加: 修复 DataProvider 永久性源黑名单 bug
+
+- [x] 完成 (2026-07-28)
+- **文件:** 改 `data/provider.py`(`__init__` 移除 `_failed_sources` 字段, `_fetch_from_sources` 移除该黑名单的读写逻辑, 只保留 Ops-1 已有的 `is_in_cooldown`/`_record_health` 持久化冷却机制)
+- **问题:** 用户发现 Dashboard"市场风险灯"截止日期停留在 7/24, 而当天已经是 7/28。排查发现 `data/sources.py` 的 sina_us/tencent 直接测试都能拿到 7/27 的新数据, 说明不是数据源没数据, 是 `DataProvider` 层的 bug。
+- **根因:** `_failed_sources`(`data/provider.py:99` 原有代码, 注释写着"stale sources — skip for all symbols")是一个**没有过期机制的全局黑名单**——只要某个源对**任意标的**的近期抓取返回过一次空结果, 就会在这个 `DataProvider` 实例的整个生命周期里被跳过。配合 `dashboard/main.py` 的 `@st.cache_resource def get_provider()` 单例模式, "session" 的实际含义变成了"直到 Streamlit 进程重启为止"——一次偶发的空结果(比如 yahoo_chart 被限流那次)就能让 SPY/QQQ/^VIX 这类标的的数据新鲜度永久性劣化。
+- **修复:** 删除 `_failed_sources` 这套永久黑名单, 统一改用 Ops-1 已经建好的 `is_in_cooldown`(基于 `source_health` 表, 15 分钟自动过期)。两套机制原本并行存在, 新的这套有时效性但从未真正接管旧逻辑的位置, 这次是把旧的一次性剔除。
+- **验证:** 用干净的临时 cache(无历史失败记录)复现修复前后行为 —— 修复前 `force_refresh=True` 仍卡在 7/24 (旧黑名单在同进程内测试脚本触发过一次空结果后永久生效); 修复后干净环境下 sina_us 正确拿到 7/27 数据。`tests/test_source_health.py` + `tests/test_provider.py`(75 用例)全绿, 全量回归 1343 个测试无回归。
+
 ---
 
 > 此文档将随开发进度持续更新。每完成一项，勾选其 checkbox 并在进度表中记录。

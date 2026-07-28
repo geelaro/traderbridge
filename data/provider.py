@@ -96,7 +96,6 @@ class DataProvider:
             AKShareSource(),
         ]
         self._fetch_failures: set = set()  # symbols that failed this session entirely
-        self._failed_sources: set = set()  # stale sources — skip for all symbols
         self._tail_attempted: set = set()  # (symbol, end) pairs already attempted
         # Deduplicate cross-source drift warnings — only warn once per
         # (symbol, source) pair per session.
@@ -250,16 +249,19 @@ class DataProvider:
     ) -> Tuple[pd.DataFrame, Optional[str]]:
         """Try sources in priority order; return (df, actual_source_name).
 
-        Sources that returned empty for recent-date fetches are marked stale
-        for the remainder of the session, avoiding repeated log spam.
+        Sources that fail are recorded in the persisted source_health table
+        (see data/source_health.py) and skipped while in cooldown — a
+        transient failure degrades fetches for ~15 minutes, not for the
+        rest of the process's life. (Previously this used an in-memory
+        _failed_sources set with no expiry; combined with dashboard/main.py's
+        @st.cache_resource singleton DataProvider, one empty result for any
+        symbol could permanently blacklist a source for the whole Streamlit
+        session. See ROADMAP.md.)
         """
         market = classify_symbol(symbol)
         priorities = SOURCE_PRIORITY.get(market, SOURCE_PRIORITY["default"])
-        is_recent = (pd.Timestamp(end) - pd.Timestamp.now().normalize()).days >= -3
 
         for source_name in priorities:
-            if source_name in self._failed_sources:
-                continue
             if self._is_source_cooling_down(source_name):
                 continue
             src = self._find_source_by_name(source_name)
@@ -272,9 +274,6 @@ class DataProvider:
                     logger.info("  → got %d bars from %s", len(df), source_name)
                     self._record_health(source_name, success=True)
                     return df, source_name
-                # Source returned empty for recent data → stale for this session
-                if is_recent:
-                    self._failed_sources.add(source_name)
                 self._record_health(source_name, success=False, detail="empty result")
             except (ConnectionError, TimeoutError, OSError, ValueError, KeyError) as exc:
                 logger.warning("Source %s failed for %s", source_name, symbol)
