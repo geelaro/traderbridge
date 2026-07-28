@@ -165,7 +165,9 @@ class DataProvider:
         gaps = self._find_gaps(sym, start, end, force_refresh)
         any_fetched = False
         for gap_start, gap_end in gaps:
-            fetched, actual_source = self._fetch_from_sources(sym, gap_start, gap_end)
+            fetched, actual_source = self._fetch_from_sources(
+                sym, gap_start, gap_end, bypass_cooldown=force_refresh,
+            )
             if fetched is not None and not fetched.empty:
                 self._check_cross_source_drift(sym, fetched, actual_source)
                 self.cache.save(sym, fetched, source=actual_source or "unknown")
@@ -245,7 +247,7 @@ class DataProvider:
         return self.cache.missing_ranges(symbol, start, end)
 
     def _fetch_from_sources(
-        self, symbol: str, start: str, end: str
+        self, symbol: str, start: str, end: str, bypass_cooldown: bool = False,
     ) -> Tuple[pd.DataFrame, Optional[str]]:
         """Try sources in priority order; return (df, actual_source_name).
 
@@ -257,12 +259,17 @@ class DataProvider:
         @st.cache_resource singleton DataProvider, one empty result for any
         symbol could permanently blacklist a source for the whole Streamlit
         session. See ROADMAP.md.)
+
+        ``bypass_cooldown`` is set only for an explicit caller-requested
+        ``force_refresh`` — a deliberate manual retry should not be silently
+        swallowed by an unrelated recent failure's cooldown window. Ordinary
+        gap-fill/incremental fetches still respect cooldown normally.
         """
         market = classify_symbol(symbol)
         priorities = SOURCE_PRIORITY.get(market, SOURCE_PRIORITY["default"])
 
         for source_name in priorities:
-            if self._is_source_cooling_down(source_name):
+            if not bypass_cooldown and self._is_source_cooling_down(source_name):
                 continue
             src = self._find_source_by_name(source_name)
             if src is None or not src.supports(symbol):

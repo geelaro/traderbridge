@@ -582,6 +582,7 @@
 - **根因:** `_failed_sources`(`data/provider.py:99` 原有代码, 注释写着"stale sources — skip for all symbols")是一个**没有过期机制的全局黑名单**——只要某个源对**任意标的**的近期抓取返回过一次空结果, 就会在这个 `DataProvider` 实例的整个生命周期里被跳过。配合 `dashboard/main.py` 的 `@st.cache_resource def get_provider()` 单例模式, "session" 的实际含义变成了"直到 Streamlit 进程重启为止"——一次偶发的空结果(比如 yahoo_chart 被限流那次)就能让 SPY/QQQ/^VIX 这类标的的数据新鲜度永久性劣化。
 - **修复:** 删除 `_failed_sources` 这套永久黑名单, 统一改用 Ops-1 已经建好的 `is_in_cooldown`(基于 `source_health` 表, 15 分钟自动过期)。两套机制原本并行存在, 新的这套有时效性但从未真正接管旧逻辑的位置, 这次是把旧的一次性剔除。
 - **验证:** 用干净的临时 cache(无历史失败记录)复现修复前后行为 —— 修复前 `force_refresh=True` 仍卡在 7/24 (旧黑名单在同进程内测试脚本触发过一次空结果后永久生效); 修复后干净环境下 sina_us 正确拿到 7/27 数据。`tests/test_source_health.py` + `tests/test_provider.py`(75 用例)全绿, 全量回归 1343 个测试无回归。
+- **修复当天验证时又发现一个衍生缺口**: `_is_source_cooling_down` 不管 `force_refresh` 是否为 True 都会拦截, 导致真实场景下(反复调试同一个源触发了 sina_us/tencent 的真实短暂失败)用户主动 `force_refresh=True` 也拿不到新数据, 要傻等 15 分钟冷却期自然过期。修了 `_fetch_from_sources` 新增 `bypass_cooldown` 参数, 只有显式 `force_refresh=True` 时才跳过冷却检查, 普通增量抓取路径不受影响。新增 `test_force_refresh_bypasses_cooldown` 用例锁定这个行为。最终 1344 个测试全绿。
 
 ---
 

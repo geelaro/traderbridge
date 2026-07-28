@@ -196,6 +196,18 @@ class TestProviderCooldownIntegration:
         provider.get_daily("AAPL", start="2025-01-01", end="2025-01-15")
         assert flaky_calls == []  # never even attempted — skipped via cooldown
 
+    def test_force_refresh_bypasses_cooldown(self, temp_cache):
+        """A deliberate force_refresh must not be silently swallowed by an
+        unrelated recent failure's cooldown window — the whole point of
+        asking for a forced refresh is to retry right now regardless."""
+        record_fetch_result(temp_cache, "sina_us", success=False, detail="pre-seeded")
+        good = _GoodSource("sina_us")
+        provider = DataProvider(cache=temp_cache, sources=[good])
+
+        df = provider.get_daily("AAPL", start="2025-01-01", end="2025-01-15",
+                                 force_refresh=True)
+        assert not df.empty  # sina_us was actually retried despite cooldown
+
 
 class TestProviderHealthTrackingBestEffort:
     def test_cache_write_failure_does_not_break_fetch(self, temp_cache, monkeypatch):
