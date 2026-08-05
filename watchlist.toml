@@ -82,6 +82,18 @@ name = "DRAM"
 active = "daily_macd_kdj"
 monitor = []
 
+[[watchlist]]
+symbol = "510300"
+name = "沪深300ETF"
+active = "weekly_macd_kdj"
+monitor = ["spy_ma_breakout"]
+
+[[watchlist]]
+symbol = "510500"
+name = "中证500ETF"
+active = "weekly_macd_kdj"
+monitor = ["spy_ma_breakout"]
+
 [strategy.weekly_macd]
 macd_fast = 12
 macd_slow = 26
