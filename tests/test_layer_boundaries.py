@@ -55,12 +55,44 @@ def _parse(path: Path) -> ast.Module:
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
+def _is_type_checking_guard(node: ast.AST) -> bool:
+    """True if *node* is an `if TYPE_CHECKING:` guard — its body is type-only
+    (annotations, Protocol stubs), not a runtime dependency."""
+    if not isinstance(node, ast.If):
+        return False
+    test = node.test
+    if isinstance(test, ast.Name) and test.id == "TYPE_CHECKING":
+        return True
+    if isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING":
+        return True  # typing.TYPE_CHECKING
+    if isinstance(test, ast.BoolOp) and all(
+        isinstance(v, ast.Name) and v.id == "TYPE_CHECKING" for v in test.values
+    ):
+        return True
+    return False
+
+
+def _iter_code_nodes(tree: ast.Module):
+    """Yield every AST node in *tree* except those inside an ``if
+    TYPE_CHECKING:`` guard — type-only imports/annotations are not runtime
+    layer dependencies, so a ``from live import ...`` that only feeds a
+    type hint must not trip the boundary check."""
+    def _walk(node):
+        if _is_type_checking_guard(node):
+            return
+        yield node
+        for child in ast.iter_child_nodes(node):
+            yield from _walk(child)
+
+    yield from _walk(tree)
+
+
 def _top_level_import_modules(tree: ast.Module):
     """Yield (root_module_name, lineno) for every import in *tree*.
 
     'from a.b import c' → ('a', lineno); 'import a.b' → ('a', lineno).
     """
-    for node in ast.walk(tree):
+    for node in _iter_code_nodes(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 yield alias.name.split(".")[0], node.lineno
@@ -120,6 +152,29 @@ class TestEngineOnlyImportsBrokerValueTypes:
         )
 
 
+class TestTypeCheckingGuardsIgnored:
+    """Type-only imports (`if TYPE_CHECKING:`) are not runtime layer
+    dependencies — a ``from live import ...`` that only feeds an annotation
+    must not trip the boundary check."""
+
+    def test_bare_guard_skipped(self):
+        src = (
+            "if TYPE_CHECKING:\n"
+            "    from live.order_manager import OrderManager\n"
+            "from data import provider\n"
+        )
+        mods = [m for m, _ in _top_level_import_modules(ast.parse(src))]
+        assert mods == ["data"]  # the live import is type-only
+
+    def test_typing_qualified_guard_skipped(self):
+        src = (
+            "if typing.TYPE_CHECKING:\n"
+            "    from broker import Broker\n"
+        )
+        mods = [m for m, _ in _top_level_import_modules(ast.parse(src))]
+        assert mods == []
+
+
 class TestSubmitOrderCallSites:
     """.submit_order() is the one call that actually places a live/paper
     order — restrict where it can be invoked from to the daemon order
@@ -134,7 +189,7 @@ class TestSubmitOrderCallSites:
             tree = _parse(path)
             has_call = any(
                 isinstance(node, ast.Attribute) and node.attr == "submit_order"
-                for node in ast.walk(tree)
+                for node in _iter_code_nodes(tree)
             )
             if has_call and rel not in _SUBMIT_ORDER_ALLOWED_FILES:
                 violations.append(rel)

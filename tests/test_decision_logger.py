@@ -25,10 +25,13 @@ def store():
     s.init_schema()
     yield s
     s.close()
-    try:
-        os.unlink(path)
-    except OSError:
-        pass
+    # init_schema enables WAL — clean up -wal/-shm sidecars too (Windows
+    # leaves them behind after the main db is unlinked).
+    for suffix in ("", "-wal", "-shm"):
+        try:
+            os.unlink(path + suffix)
+        except OSError:
+            pass
 
 
 class TestRecordDecision:

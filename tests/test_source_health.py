@@ -209,6 +209,49 @@ class TestProviderCooldownIntegration:
         assert not df.empty  # sina_us was actually retried despite cooldown
 
 
+class TestSymbolRetryWindow:
+    """_fetch_failures must be a *window*, not a permanent blacklist — a
+    symbol whose full fetch failed is skipped briefly, then retried (or
+    immediately cleared by force_refresh)."""
+
+    def _flaky_provider(self, temp_cache, sources=None):
+        flaky = _FlakySource("tencent")
+        provider = DataProvider(cache=temp_cache, sources=sources or [flaky])
+        return flaky, provider
+
+    def _wrap_count(self, flaky):
+        calls = []
+        original_fetch = flaky.fetch
+        flaky.fetch = lambda *a, **kw: calls.append(1) or original_fetch(*a, **kw)
+        return calls
+
+    def test_failure_short_circuits_within_window(self, temp_cache):
+        flaky, provider = self._flaky_provider(temp_cache)
+        provider.get_daily("AAPL", start="2025-01-01", end="2025-01-15")  # full failure
+        calls = self._wrap_count(flaky)
+        provider.get_daily("AAPL", start="2025-01-01", end="2025-01-15")
+        assert calls == []  # not re-hammered within the retry window
+
+    def test_retry_after_window_lapses(self, temp_cache, monkeypatch):
+        monkeypatch.setattr(provider_module, "_SYMBOL_RETRY_WINDOW_SECONDS", -1)
+        flaky, provider = self._flaky_provider(temp_cache)
+        # isolate the retry-window logic from source cooldown (which would
+        # independently skip tencent after its recent failure)
+        monkeypatch.setattr(provider, "_is_source_cooling_down", lambda s: False)
+        provider.get_daily("AAPL", start="2025-01-01", end="2025-01-15")  # full failure
+        calls = self._wrap_count(flaky)
+        provider.get_daily("AAPL", start="2025-01-01", end="2025-01-15")
+        assert calls != []  # window lapsed → the symbol is attempted again
+
+    def test_force_refresh_clears_failure(self, temp_cache):
+        flaky, provider = self._flaky_provider(temp_cache)
+        provider.get_daily("AAPL", start="2025-01-01", end="2025-01-15")  # full failure
+        calls = self._wrap_count(flaky)
+        provider.get_daily("AAPL", start="2025-01-01", end="2025-01-15",
+                           force_refresh=True)
+        assert calls != []  # explicit force_refresh must always re-attempt
+
+
 class TestProviderHealthTrackingBestEffort:
     def test_cache_write_failure_does_not_break_fetch(self, temp_cache, monkeypatch):
         """The critical safety property from the plan: a bug in health

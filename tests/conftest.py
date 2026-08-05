@@ -94,10 +94,13 @@ def temp_cache():
     cache = CacheManager(db_path=path)
     yield cache
     cache.close()
-    try:
-        os.unlink(path)
-    except OSError:
-        pass
+    # init_schema enables WAL — the -wal/-shm sidecar files survive the
+    # main db unlink on Windows and leak into the temp dir otherwise.
+    for suffix in ("", "-wal", "-shm"):
+        try:
+            os.unlink(path + suffix)
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------------------

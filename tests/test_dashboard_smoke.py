@@ -20,6 +20,7 @@ consistent with this repo's "1043 tests, all offline" convention.
 """
 
 import importlib
+import zlib
 
 import numpy as np
 import pandas as pd
@@ -77,7 +78,9 @@ class _MockPriceSource(DataSource):
 
     def fetch(self, symbol: str, start: str, end: str) -> pd.DataFrame:
         dates = pd.bdate_range("2023-01-01", periods=280)
-        rng = np.random.default_rng(abs(hash(symbol)) % (2**32))
+        # crc32 (not hash()) so the series is reproducible across runs —
+        # str.__hash__ is randomized per-process (PYTHONHASHSEED).
+        rng = np.random.default_rng(zlib.crc32(symbol.encode("utf-8")))
         close = 100 * np.exp(np.cumsum(rng.normal(0.0003, 0.012, len(dates))))
         df = pd.DataFrame({
             "Open": close * 0.99, "High": close * 1.02,
@@ -137,5 +140,11 @@ class TestRenderSmoke:
             scan_date="2023-10-03", symbol="BBB", strategy="weekly_macd",
             bar_date="2023-10-03", signal=1, price=50.0, atr=1.0,
             indicators='{"MACD": 0.2}',
+        )
+        # CN symbol — exercises the ¥ price formatting branch
+        temp_cache.save_signal(
+            scan_date="2023-10-03", symbol="510300", strategy="weekly_macd_kdj",
+            bar_date="2023-10-03", signal=1, price=4.6, atr=0.1,
+            indicators="{}",
         )
         render_signal_history(temp_cache, smoke_config)

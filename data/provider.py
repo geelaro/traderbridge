@@ -9,8 +9,9 @@ Responsibilities
 """
 
 import logging
+import time
 from datetime import date, datetime
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -33,6 +34,13 @@ from .sources import (
 from .source_health import is_in_cooldown, record_fetch_result
 
 logger = logging.getLogger(__name__)
+
+
+# A symbol whose full fetch returned nothing from every source is remembered
+# for this long before it's retried — mirrors the source_health cooldown
+# window (data/source_health.py), so a transient outage degrades fetches for
+# ~15 minutes, not for the rest of the process's life.
+_SYMBOL_RETRY_WINDOW_SECONDS = 15 * 60
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +103,11 @@ class DataProvider:
             YahooChartSource(),
             AKShareSource(),
         ]
-        self._fetch_failures: set = set()  # symbols that failed this session entirely
+        # symbol → monotonic() timestamp of the last full-fetch failure.
+        # Unlike the old set this expires (_SYMBOL_RETRY_WINDOW_SECONDS), so
+        # a symbol whose sources recover is retried instead of being silently
+        # short-circuited to cache for the rest of the session.
+        self._fetch_failures: Dict[str, float] = {}
         self._tail_attempted: set = set()  # (symbol, end) pairs already attempted
         # Deduplicate cross-source drift warnings — only warn once per
         # (symbol, source) pair per session.
@@ -157,10 +169,17 @@ class DataProvider:
                 return self._load_from_cache(sym, start, end)
 
         # Full gap scan (force_refresh, internal gaps, or first fetch)
-        if force_refresh and sym in self._fetch_failures:
-            self._fetch_failures.discard(sym)
-        if sym in self._fetch_failures:
-            return self._load_from_cache(sym, start, end)
+        if force_refresh:
+            self._fetch_failures.pop(sym, None)
+        else:
+            fail_ts = self._fetch_failures.get(sym)
+            if fail_ts is not None:
+                if time.monotonic() - fail_ts < _SYMBOL_RETRY_WINDOW_SECONDS:
+                    # Recent full-fetch failure — don't hammer the sources
+                    # again on every dashboard rerun; retry once the window
+                    # lapses (or on an explicit force_refresh).
+                    return self._load_from_cache(sym, start, end)
+                self._fetch_failures.pop(sym, None)  # window lapsed → retry
 
         gaps = self._find_gaps(sym, start, end, force_refresh)
         any_fetched = False
@@ -173,7 +192,7 @@ class DataProvider:
                 self.cache.save(sym, fetched, source=actual_source or "unknown")
                 any_fetched = True
         if gaps and not any_fetched:
-            self._fetch_failures.add(sym)
+            self._fetch_failures[sym] = time.monotonic()
 
         return self._load_from_cache(sym, start, end)
 

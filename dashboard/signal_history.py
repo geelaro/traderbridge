@@ -30,7 +30,8 @@ import json
 import pandas as pd
 import streamlit as st
 
-from strategy import SIGNAL_LABEL, STRATEGY_MAP
+from data.protocol import classify_symbol
+from strategy import STRATEGY_MAP
 
 _WINDOW_OPTIONS = {"7天": 7, "30天": 30, "90天": 90, "180天": 180, "365天": 365, "全部": None}
 _DIR_OPTIONS = {"全部": None, "买入": 1, "卖出": -1}
@@ -109,12 +110,18 @@ def render_signal_history(cache, config):
     m3.metric("📈 买入事件", n_buy)
     m4.metric("📉 卖出事件", n_sell)
 
+    def _fmt_price(row):
+        if pd.isna(row["price"]):
+            return "—"
+        prefix = "¥" if classify_symbol(row["symbol"]) == "cn" else "$"
+        return f"{prefix}{row['price']:.2f}"
+
     display_df = pd.DataFrame({
         "K线日期": grouped["bar_date"],
         "标的": grouped["symbol"],
         "策略": grouped["strategy"],
         "方向": grouped["signal"].map(_DIR_ICON),
-        "价格": grouped["price"].map(lambda v: f"${v:.2f}" if pd.notna(v) else "—"),
+        "价格": grouped.apply(_fmt_price, axis=1),
         "ATR": grouped["atr"].map(lambda v: f"{v:.2f}" if pd.notna(v) else "—"),
         "首次探测": grouped["first_seen"],
         "最近确认": grouped["last_confirmed"],
