@@ -23,6 +23,21 @@ _RISK_THEME = {
     RiskLevel.RED:    {"bg": "#f8d7da", "border": "#dc3545", "fg": "#721c24", "label": "RED · 高压力"},
 }
 
+_OVERSOLD_LABELS = {"超卖", "极度超卖"}
+_OVERBOUGHT_LABELS = {"超买", "极度超买"}
+
+
+def _render_sentiment_state(container, label: str) -> None:
+    """Use the same visual language as the pressure alerts for sentiment."""
+    if label in _OVERSOLD_LABELS:
+        container.error(label)
+    elif label in _OVERBOUGHT_LABELS:
+        container.success(label)
+    elif label == "中性":
+        container.warning(label)
+    else:
+        container.info(label or "数据不可用")
+
 
 def render_risk_light(config, target_date, provider):
     """Render market sentiment plus a separate market-stress light."""
@@ -94,9 +109,12 @@ def render_risk_light(config, target_date, provider):
     qqq_sentiment = state.market_sentiments.get("QQQ", {})
     st.markdown("**市场情绪温度** · 0 极度超卖 · 50 中性 · 100 极度超买")
     s1, s2, s3 = st.columns(3)
-    s1.metric("大盘整体", f"{overall:.1f}" if overall is not None else "—", state.sentiment_label)
-    s2.metric("SPY", f"{spy_sentiment.get('score', 0):.1f}" if spy_sentiment.get("score") is not None else "—", spy_sentiment.get("label", "数据不足"))
-    s3.metric("QQQ", f"{qqq_sentiment.get('score', 0):.1f}" if qqq_sentiment.get("score") is not None else "—", qqq_sentiment.get("label", "数据不可用"))
+    s1.metric("大盘整体", f"{overall:.1f}" if overall is not None else "—")
+    s2.metric("SPY", f"{spy_sentiment.get('score', 0):.1f}" if spy_sentiment.get("score") is not None else "—")
+    s3.metric("QQQ", f"{qqq_sentiment.get('score', 0):.1f}" if qqq_sentiment.get("score") is not None else "—")
+    _render_sentiment_state(s1, state.sentiment_label)
+    _render_sentiment_state(s2, spy_sentiment.get("label", "数据不足"))
+    _render_sentiment_state(s3, qqq_sentiment.get("label", "数据不可用"))
 
     ind = state.indicators
     st.markdown("**市场参考**")
