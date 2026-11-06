@@ -23,12 +23,6 @@ active = "weekly_macd_kdj"
 monitor = ["spy_ma_breakout"]
 
 [[watchlist]]
-symbol = "GOOG"
-name = "Alphabet"
-active = "weekly_macd_kdj"
-monitor = ["spy_ma_breakout"]
-
-[[watchlist]]
 symbol = "AMZN"
 name = "Amazon"
 active = "weekly_macd_kdj"
@@ -91,6 +85,12 @@ monitor = ["spy_ma_breakout"]
 [[watchlist]]
 symbol = "510500"
 name = "中证500ETF"
+active = "weekly_macd_kdj"
+monitor = ["spy_ma_breakout"]
+
+[[watchlist]]
+symbol = "GOOGL"
+name = "Alphabet"
 active = "weekly_macd_kdj"
 monitor = ["spy_ma_breakout"]
 
