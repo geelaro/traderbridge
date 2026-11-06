@@ -190,13 +190,28 @@ class RiskReport:
         ind = state.indicators or {}
         label = {"green": "🟢 GREEN", "yellow": "🟡 YELLOW",
                  "red": "🔴 RED"}.get(state.level.value, state.level.value)
+        top_label = {
+            "normal": "正常",
+            "elevated": "偏热",
+            "high": "顶部风险偏高",
+            "unknown": "数据不足",
+        }.get(state.top_risk_level, state.top_risk_level)
+        reasons = list(state.reasons or [])
+        if state.top_risk_reasons:
+            reasons.append(
+                f"上涨过热/顶部风险: {top_label} "
+                f"({'; '.join(state.top_risk_reasons)})"
+            )
         return Section(
             title="🚦 风险灯",
-            summary=f"当前 **{label}** | " + " ; ".join(state.reasons or []),
+            summary=f"当前 **{label}** | " + " ; ".join(reasons),
             metrics={
                 "SPY": f"${ind.get('spy_close', 0):.2f}",
                 "vs MA200": f"{ind.get('spy_vs_ma200_pct', 0):+.2f}%",
                 "SPY 5日": f"{ind.get('spy_5d_return_pct', 0):+.2f}%",
+                "SPY 20日": f"{ind.get('spy_20d_return_pct', 0):+.2f}%",
+                "RSI14": f"{ind.get('spy_rsi14', 0):.1f}",
+                "顶部风险": top_label,
                 "SPY ADX": f"{ind.get('spy_adx', 0):.1f}",
                 "VIX": f"{ind.get('vix', 0):.2f} "
                        f"({'实时' if ind.get('vix_source') == 'realtime' else '昨收'})",

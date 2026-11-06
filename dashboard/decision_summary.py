@@ -63,16 +63,28 @@ def build_decision_summary(config: dict, target_date, provider, cache) -> dict:
     end_ts = pd.Timestamp(target_date)
     errors: list[str] = []
 
-    risk_level, risk_reasons, market_state = _risk_and_regime(config, end_ts, provider, errors)
+    risk_level, risk_reasons, market_state, top_risk_level, top_risk_reasons = _risk_and_regime(
+        config, end_ts, provider, errors,
+    )
     signals = _today_signals(config, end_ts, provider, cache, errors)
     rejected = _rejected_signals(config, market_state, signals, errors)
     risk_snapshot, risk_delta = _risk_delta(config, target_date, provider, cache, errors)
 
-    trading_paused = (cache.load_risk_state("trading_paused") == "True")
-    pause_reason = cache.load_risk_state("pause_reason") or ""
+    live_risk = _live_risk_snapshot(cache)
+    trading_paused = (
+        bool(live_risk.get("paused"))
+        if live_risk is not None
+        else cache.load_risk_state("trading_paused") == "True"
+    )
+    pause_reason = (
+        live_risk.get("pause_reason", "")
+        if live_risk is not None
+        else cache.load_risk_state("pause_reason") or ""
+    )
 
     verdict_code, verdict_text = _verdict(
         risk_level, trading_paused, pause_reason, signals, rejected,
+        top_risk_level=top_risk_level,
     )
 
     return {
@@ -80,6 +92,8 @@ def build_decision_summary(config: dict, target_date, provider, cache) -> dict:
         "verdict_text": verdict_text,
         "risk_level": risk_level,
         "risk_reasons": risk_reasons,
+        "top_risk_level": top_risk_level,
+        "top_risk_reasons": top_risk_reasons,
         "regime": market_state.regime if market_state else None,
         "volatility": market_state.volatility if market_state else None,
         "signals": signals,
@@ -88,6 +102,7 @@ def build_decision_summary(config: dict, target_date, provider, cache) -> dict:
         "rejected_count": len(rejected),
         "risk_snapshot": risk_snapshot,
         "risk_delta": risk_delta,
+        "live_risk": live_risk,
         "trading_paused": trading_paused,
         "pause_reason": pause_reason,
         "errors": errors,
@@ -109,11 +124,14 @@ def _risk_and_regime(config, end_ts, provider, errors):
         live_vix = get_realtime_vix()
         state = compute_risk_state(spy_df, vix_df, realtime_vix=live_vix)
         market_state = MarketStateClassifier(spy_df).classify()
-        return state.level, state.reasons, market_state
+        return (
+            state.level, state.reasons, market_state,
+            state.top_risk_level, state.top_risk_reasons,
+        )
     except Exception as exc:
         logger.warning("decision_summary: risk/regime 计算失败: %s", exc)
         errors.append("风险灯/regime 数据不可用")
-        return None, [], None
+        return None, [], None, "unknown", []
 
 
 def _today_signals(config, end_ts, provider, cache, errors):
@@ -196,7 +214,23 @@ def _risk_delta(config, target_date, provider, cache, errors):
         return None, None
 
 
-def _verdict(risk_level, trading_paused, pause_reason, signals, rejected):
+def _live_risk_snapshot(cache):
+    """Load the daemon's latest guardrail snapshot, if one exists."""
+    raw = cache.load_risk_state("risk_operational_snapshot")
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw)
+        return value if isinstance(value, dict) else None
+    except (TypeError, ValueError):
+        logger.warning("decision_summary: live risk snapshot is malformed")
+        return None
+
+
+def _verdict(
+    risk_level, trading_paused, pause_reason, signals, rejected,
+    top_risk_level="normal",
+):
     if trading_paused:
         return "paused", f"🛑 已暂停交易 — {pause_reason}"
     if risk_level == RiskLevel.RED:
@@ -206,6 +240,8 @@ def _verdict(risk_level, trading_paused, pause_reason, signals, rejected):
     if len(rejected) >= len(signals):
         return "all_blocked", "🟡 有信号但被过滤，无可执行操作"
     actionable = len(signals) - len(rejected)
+    if top_risk_level == "high":
+        return "top_caution", f"🟡 有 {actionable} 个信号，但大盘上涨过热，不建议追高"
     return "actionable", f"🟢 可正常交易 — {actionable} 个信号可执行"
 
 
@@ -218,6 +254,7 @@ _VERDICT_THEME = {
     "red":        {"bg": "#f8d7da", "border": "#dc3545", "fg": "#721c24"},
     "no_signal":  {"bg": "#e2e3e5", "border": "#6c757d", "fg": "#383d41"},
     "all_blocked": {"bg": "#fff3cd", "border": "#ffc107", "fg": "#856404"},
+    "top_caution": {"bg": "#fff3cd", "border": "#d39e00", "fg": "#6b4f00"},
     "actionable": {"bg": "#d4edda", "border": "#28a745", "fg": "#155724"},
 }
 
@@ -254,12 +291,28 @@ def render_decision_summary(summary: dict) -> None:
         regime = summary["regime"]
         regime_label = _REGIME_LABEL.get(regime.name, regime.name) if regime else "—"
         st.metric("风险灯 × Regime", f"{level_label} × {regime_label}")
+        if summary.get("top_risk_level") == "high":
+            st.caption("顶部风险偏高: 超买 / 乖离 / 短期涨幅出现共振，避免追高")
         with st.expander("判定依据"):
             if summary["risk_reasons"]:
                 for r in summary["risk_reasons"]:
                     st.write(f"- {r}")
             else:
                 st.caption("无额外依据 / 数据不可用")
+            if summary.get("top_risk_reasons"):
+                st.markdown("**上涨过热依据**")
+                for reason in summary["top_risk_reasons"]:
+                    st.write(f"- {reason}")
+            live = summary.get("live_risk")
+            if live:
+                status = "暂停" if live.get("paused") else "运行中"
+                st.caption(
+                    f"实盘风控: {status} | 敞口 {live.get('exposure_pct', 0):.1f}% | "
+                    f"日内交易 {live.get('daily_trade_count', 0)} 笔 | "
+                    f"连续亏损 {live.get('consecutive_losses', 0)} 笔"
+                )
+                if live.get("pause_reason"):
+                    st.caption(f"暂停原因: {live['pause_reason']}")
 
     with col2:
         st.metric("被拒信号", f"{summary['rejected_count']} / {summary['signals_total']}")

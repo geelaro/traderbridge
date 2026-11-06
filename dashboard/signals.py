@@ -25,7 +25,7 @@ _RISK_THEME = {
 
 
 def render_risk_light(config, target_date, provider):
-    """Top-of-dashboard risk light: SPY MA200 + ADX + VIX → green/yellow/red."""
+    """Render downside risk, upside overbought, and top-risk consensus."""
     st.subheader("市场风险灯")
 
     lookback = config.get("scanner", {}).get("lookback_years", 3)
@@ -92,17 +92,25 @@ def render_risk_light(config, target_date, provider):
 
     # Indicator row
     ind = state.indicators
-    c1, c2, c3, c4, c5 = st.columns(5)
+    c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
     c1.metric(
         "SPY",
         f"${ind.get('spy_close', 0):.2f}",
         f"{ind.get('spy_vs_ma200_pct', 0):+.1f}% vs MA200",
     )
     c2.metric("SPY 5日", f"{ind.get('spy_5d_return_pct', 0):+.2f}%")
-    c3.metric("SPY ADX", f"{ind.get('spy_adx', 0):.1f}")
+    c3.metric("SPY 20日", f"{ind.get('spy_20d_return_pct', 0):+.2f}%")
+    c4.metric(
+        "SPY RSI14",
+        f"{ind.get('spy_rsi14', 0):.1f}",
+        delta="超买" if ind.get("overbought") else "正常",
+        delta_color="inverse" if ind.get("overbought") else "off",
+        help="RSI ≥70 为超买区, 只代表上涨过快, 不代表立即反转.",
+    )
+    c5.metric("SPY ADX", f"{ind.get('spy_adx', 0):.1f}")
     vix_src = ind.get("vix_source", "eod")
     vix_label = "VIX (实时)" if vix_src == "realtime" else "VIX (昨收)"
-    c4.metric(
+    c6.metric(
         vix_label,
         f"{ind.get('vix', 0):.2f}",
         delta=None,
@@ -123,7 +131,7 @@ def render_risk_light(config, target_date, provider):
             "greed": "贪婪",
             "extreme greed": "极度贪婪",
         }.get(fg_rating, fg_rating)
-        c5.metric(
+        c7.metric(
             "F&G (CNN)",
             f"{fg_score:.0f}",
             delta=rating_zh,
@@ -131,8 +139,29 @@ def render_risk_light(config, target_date, provider):
             help="CNN 恐惧贪婪指数. 0-25 极度恐慌, 25-45 恐慌, 45-55 中性, 55-75 贪婪, 75-100 极度贪婪. 数据源 production.dataviz.cnn.io JSON 接口",
         )
     else:
-        c5.metric("F&G (CNN)", "—", delta="数据不可用", delta_color="off",
+        c7.metric("F&G (CNN)", "—", delta="数据不可用", delta_color="off",
                    help="CNN 接口暂时无响应 — 检查代理/网络")
+
+    top_label = {
+        "normal": "正常",
+        "elevated": "偏热",
+        "high": "顶部风险偏高",
+        "unknown": "数据不足",
+    }.get(state.top_risk_level, state.top_risk_level)
+    top_color = {"normal": "#198754", "elevated": "#b58105", "high": "#c0392b"}.get(
+        state.top_risk_level, "#6c757d"
+    )
+    st.markdown(
+        f"<div style='border-left:4px solid {top_color};padding:8px 12px;"
+        f"margin:8px 0;color:{top_color};'><b>大盘超买 / 顶部风险: {top_label}</b>"
+        f"<span style='margin-left:12px;color:#666;'>"
+        f"共振分数 {ind.get('top_risk_score', 0)}</span></div>",
+        unsafe_allow_html=True,
+    )
+    if state.top_risk_reasons:
+        with st.expander("查看超买与顶部风险依据"):
+            for reason in state.top_risk_reasons:
+                st.markdown(f"- {reason}")
 
     # Reason bullets
     if state.reasons:

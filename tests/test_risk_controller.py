@@ -155,6 +155,39 @@ class TestCheckGlobal:
         assert result is False
         assert "敞口超限" in controller.pause_reason
 
+    def test_pause_state_is_persisted_for_dashboard(self, controller, account):
+        controller.risk._date = date.today().isoformat()
+        controller.risk._day_start_equity = 100_000.0
+        controller.risk._peak_equity = 120_000.0
+        account.total_equity = 93_000.0
+
+        assert controller.check_global(account, {}) is False
+
+        calls = {
+            call.args[0]: call.args[1]
+            for call in controller.cache.save_risk_state.call_args_list
+        }
+        assert calls["trading_paused"] == "True"
+        assert "日内亏损超限" in calls["pause_reason"]
+
+    def test_operational_snapshot_contains_utilisation_and_limits(self, controller, account):
+        controller.risk._day_start_equity = 100_000.0
+        controller.risk._peak_equity = 120_000.0
+        controller.risk._daily_trade_count = 2
+        controller.risk._consecutive_losses = 1
+        account.total_equity = 95_000.0
+        pos = MagicMock()
+        pos.market_value = 20_000.0
+
+        snapshot = controller.risk_snapshot(account, {"AAPL": pos})
+
+        assert snapshot["daily_pnl_pct"] == -5.0
+        assert snapshot["drawdown_pct"] == -20.83
+        assert snapshot["exposure_pct"] == pytest.approx(21.05)
+        assert snapshot["daily_trade_count"] == 2
+        assert snapshot["limits"]["max_daily_trades"] == controller.risk.max_daily_trades
+        assert snapshot["paused"] is False
+
 
 # ---------------------------------------------------------------------------
 # passes_risk
@@ -259,6 +292,30 @@ class TestStatePersistence:
         # Historical state — survives day rollover (P1-3 fix)
         assert ctrl.risk._peak_equity == 105000.0
         assert ctrl.risk._consecutive_losses == 1
+        assert ctrl.trading_paused is False
+        assert ctrl.pause_reason == ""
+
+    def test_restore_state_same_day_restores_pause(self, risk_limits, mock_cache, mock_broker, mock_notifier):
+        mock_cache.load_risk_state.side_effect = lambda key: {
+            "date": date.today().isoformat(),
+            "day_start_equity": "95000.0",
+            "peak_equity": "105000.0",
+            "consecutive_losses": "1",
+            "daily_trade_count": "2",
+            "trading_paused": "True",
+            "pause_reason": "连续亏损熔断 (3/3)",
+        }.get(key)
+        mock_cache.load_all_entry_prices.return_value = {}
+
+        ctrl = RiskController(
+            risk=risk_limits,
+            cache=mock_cache,
+            broker=mock_broker,
+            notifier=mock_notifier,
+        )
+
+        assert ctrl.trading_paused is True
+        assert ctrl.pause_reason == "连续亏损熔断 (3/3)"
 
 
 # ---------------------------------------------------------------------------

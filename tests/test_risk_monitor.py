@@ -151,7 +151,8 @@ class TestIndicators:
         spy = _synthetic_spy(np.linspace(300, 450, 250))
         state = compute_risk_state(spy, _synthetic_vix(15.0))
         for key in ["spy_close", "spy_ma200", "spy_vs_ma200_pct",
-                    "spy_adx", "spy_5d_return_pct", "vix", "as_of"]:
+                    "spy_adx", "spy_5d_return_pct", "spy_20d_return_pct",
+                    "spy_rsi14", "top_risk_level", "vix", "as_of"]:
             assert key in state.indicators
 
     def test_summary_contains_emoji_and_reasons(self):
@@ -177,6 +178,30 @@ class TestParamsOverride:
         )
         # VIX = 14, threshold = 12 → not green
         assert state.level != RiskLevel.GREEN
+
+
+class TestTopRisk:
+    def test_extended_rally_is_marked_as_high_top_risk(self):
+        spy = _synthetic_spy(np.linspace(300, 500, 300))
+        state = compute_risk_state(spy, _synthetic_vix(14.0))
+
+        assert state.top_risk_level == "high"
+        assert state.indicators["overbought"] is True
+        assert state.indicators["top_risk_score"] >= 3
+        assert any("RSI14" in reason for reason in state.top_risk_reasons)
+        assert any("MA200" in reason for reason in state.top_risk_reasons)
+
+    def test_single_overbought_signal_is_not_called_top(self):
+        # A modestly extended, smooth move can trigger RSI without meeting
+        # the two-signal consensus required for a high top-risk label.
+        close = np.concatenate([
+            np.linspace(400, 430, 270),
+            np.linspace(430, 448, 30),
+        ])
+        state = compute_risk_state(_synthetic_spy(close), _synthetic_vix(14.0))
+
+        assert state.top_risk_level in {"normal", "elevated"}
+        assert state.top_risk_level != "high"
 
 
 # ===================================================================

@@ -1,9 +1,14 @@
-"""Market risk light — green / yellow / red based on SPY MA200 + ADX + VIX.
+"""Market risk light — downside risk plus upside overheat detection.
 
 Designed as a glance-and-go indicator at the top of the dashboard. Keep the
 logic intentionally simple: 3 inputs, explicit thresholds, human-readable
 reasons. No optimisation, no fitting — these levels are conventions, not
 backtested.
+
+The light deliberately separates two ideas that are often conflated:
+``overbought`` means the market has stretched upward, while ``top risk``
+means several independent stretch signals agree.  Neither is a prediction
+that the next bar must fall; top risk is a caution against chasing entries.
 
 Thresholds
 ----------
@@ -15,7 +20,12 @@ RED    (danger):
 
 YELLOW (caution):
     everything else — typically SPY near MA200 (±3%), or ADX 15-25 (trend
-    weakening), or VIX 18-30 (elevated fear).
+    weakening), or VIX 18-30 (elevated fear). A high top-risk score also
+    is reported separately from the main green/yellow/red light.
+
+Upside stretch signals:
+    RSI(14) >= 70, SPY >= 10% above MA200, or SPY 20-day return >= 8%.
+    At least two active signals are required for ``top_risk_level=high``.
 
 Output
 ------
@@ -23,6 +33,8 @@ Each compute_risk_state() call returns a :class:`RiskState` with:
 - ``level`` — RiskLevel enum (GREEN / YELLOW / RED)
 - ``reasons`` — list of human-readable bullets explaining the call
 - ``indicators`` — current numeric values (SPY/MA200/ADX/VIX/5d return)
+- ``top_risk_level`` — ``normal`` / ``elevated`` / ``high`` / ``unknown``
+- ``top_risk_reasons`` — the independent upside-stretch signals
 
 Usage
 -----
@@ -61,6 +73,13 @@ _DEFAULTS = {
     "vix_low": 18.0,
     "vix_high": 30.0,
     "crash_5d_pct": -5.0,         # SPY drops > 5% in 5 days → instant red
+    "rsi_period": 14,
+    "rsi_overbought": 70.0,
+    "rsi_extreme": 80.0,
+    "extension_warn_pct": 10.0,   # SPY above MA200
+    "extension_high_pct": 15.0,
+    "rally_20d_warn_pct": 8.0,
+    "rally_20d_high_pct": 12.0,
 }
 
 
@@ -71,6 +90,8 @@ class RiskState:
     level: RiskLevel
     reasons: List[str] = field(default_factory=list)
     indicators: dict = field(default_factory=dict)
+    top_risk_level: str = "unknown"
+    top_risk_reasons: List[str] = field(default_factory=list)
 
     @property
     def emoji(self) -> str:
@@ -144,6 +165,74 @@ def compute_risk_state(
     else:
         ret_5d = 0.0
 
+    # Upside stretch indicators. These are intentionally kept separate from
+    # the downside risk-light reasons: a strong trend can be both healthy and
+    # overbought, and the right response is usually to avoid chasing rather
+    # than to liquidate.
+    rsi_period = int(p["rsi_period"])
+    close_series = spy["Close"].astype(float)
+    delta = close_series.diff()
+    gains = delta.clip(lower=0).rolling(rsi_period).mean()
+    losses = (-delta.clip(upper=0)).rolling(rsi_period).mean()
+    rs = gains / losses.replace(0, pd.NA)
+    rsi_series = 100 - (100 / (1 + rs))
+    rsi_series = rsi_series.where(~((losses == 0) & (gains > 0)), 100.0)
+    rsi_series = rsi_series.where(~((losses == 0) & (gains == 0)), 50.0)
+    rsi = float(rsi_series.iloc[-1]) if pd.notna(rsi_series.iloc[-1]) else 50.0
+    ret_20d = (
+        (spy_close / float(spy["Close"].iloc[-21]) - 1) * 100
+        if len(spy) >= 22 else 0.0
+    )
+
+    top_risk_reasons: List[str] = []
+    top_score = 0
+    active_stretch = 0
+    if rsi >= p["rsi_extreme"]:
+        active_stretch += 1
+        top_score += 2
+        top_risk_reasons.append(
+            f"RSI14={rsi:.1f} 极度超买 (≥ {p['rsi_extreme']:.0f})"
+        )
+    elif rsi >= p["rsi_overbought"]:
+        active_stretch += 1
+        top_score += 1
+        top_risk_reasons.append(
+            f"RSI14={rsi:.1f} 超买 (≥ {p['rsi_overbought']:.0f})"
+        )
+
+    if ma_pct >= p["extension_high_pct"]:
+        active_stretch += 1
+        top_score += 2
+        top_risk_reasons.append(
+            f"SPY 高于 MA200 {ma_pct:+.1f}% (极端乖离, ≥ {p['extension_high_pct']:.0f}%)"
+        )
+    elif ma_pct >= p["extension_warn_pct"]:
+        active_stretch += 1
+        top_score += 1
+        top_risk_reasons.append(
+            f"SPY 高于 MA200 {ma_pct:+.1f}% (乖离偏大, ≥ {p['extension_warn_pct']:.0f}%)"
+        )
+
+    if ret_20d >= p["rally_20d_high_pct"]:
+        active_stretch += 1
+        top_score += 2
+        top_risk_reasons.append(
+            f"SPY 20日涨幅 {ret_20d:+.1f}% (加速上涨, ≥ {p['rally_20d_high_pct']:.0f}%)"
+        )
+    elif ret_20d >= p["rally_20d_warn_pct"]:
+        active_stretch += 1
+        top_score += 1
+        top_risk_reasons.append(
+            f"SPY 20日涨幅 {ret_20d:+.1f}% (短期偏热, ≥ {p['rally_20d_warn_pct']:.0f}%)"
+        )
+
+    if active_stretch >= 2 and top_score >= 3:
+        top_risk_level = "high"
+    elif active_stretch >= 1:
+        top_risk_level = "elevated"
+    else:
+        top_risk_level = "normal"
+
     # VIX latest — realtime override takes precedence if supplied,
     # otherwise forward-fill onto SPY's last date from the EOD frame.
     if realtime_vix is not None and realtime_vix > 0:
@@ -160,6 +249,11 @@ def compute_risk_state(
         "spy_vs_ma200_pct": round(ma_pct, 2),
         "spy_adx": round(adx, 1),
         "spy_5d_return_pct": round(ret_5d, 2),
+        "spy_20d_return_pct": round(ret_20d, 2),
+        "spy_rsi14": round(rsi, 1),
+        "overbought": rsi >= p["rsi_overbought"],
+        "top_risk_score": top_score,
+        "top_risk_level": top_risk_level,
         "vix": round(vix_now, 2),
         "vix_source": vix_source,
         "as_of": spy.index[-1].date().isoformat(),
@@ -179,7 +273,13 @@ def compute_risk_state(
         )
 
     if red_reasons:
-        return RiskState(level=RiskLevel.RED, reasons=red_reasons, indicators=indicators)
+        return RiskState(
+            level=RiskLevel.RED,
+            reasons=red_reasons,
+            indicators=indicators,
+            top_risk_level=top_risk_level,
+            top_risk_reasons=top_risk_reasons,
+        )
 
     # ── GREEN check (all three) ────────────────────────────────────
     green_ok = (
@@ -196,6 +296,8 @@ def compute_risk_state(
                 f"VIX={vix_now:.1f} (低波, < {p['vix_low']:.0f})",
             ],
             indicators=indicators,
+            top_risk_level=top_risk_level,
+            top_risk_reasons=top_risk_reasons,
         )
 
     # ── YELLOW (default) ───────────────────────────────────────────
@@ -218,4 +320,13 @@ def compute_risk_state(
     if not yellow_reasons:
         yellow_reasons.append("综合判定: 介于绿与红之间")
 
-    return RiskState(level=RiskLevel.YELLOW, reasons=yellow_reasons, indicators=indicators)
+    if top_risk_level == "high":
+        yellow_reasons.append("上涨过热信号共振: 追高风险较高, 等待回撤或确认")
+
+    return RiskState(
+        level=RiskLevel.YELLOW,
+        reasons=yellow_reasons,
+        indicators=indicators,
+        top_risk_level=top_risk_level,
+        top_risk_reasons=top_risk_reasons,
+    )

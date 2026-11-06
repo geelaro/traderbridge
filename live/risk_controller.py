@@ -1,5 +1,6 @@
 """RiskController — risk checks, position sizing, circuit breaker, state persistence."""
 
+import json
 from datetime import date
 from typing import Dict
 
@@ -74,6 +75,14 @@ class RiskController:
             self.risk._date = today
             self.risk._daily_trade_count = int(dt) if dt else 0
             self.risk._day_start_equity = float(dse) if dse else 0.0
+            # The dashboard reads these keys to show the live pause state.
+            # Keep them day-scoped so an old daily pause cannot leak into a
+            # new trading day before the first daemon tick.
+            self.trading_paused = self.cache.load_risk_state("trading_paused") == "True"
+            self.pause_reason = self.cache.load_risk_state("pause_reason") or ""
+        else:
+            self.trading_paused = False
+            self.pause_reason = ""
 
         self.entry_prices = {
             sym: price for sym, (price, _) in self.cache.load_all_entry_prices().items()
@@ -85,6 +94,49 @@ class RiskController:
         self.cache.save_risk_state("peak_equity", str(self.risk._peak_equity))
         self.cache.save_risk_state("consecutive_losses", str(self.risk._consecutive_losses))
         self.cache.save_risk_state("daily_trade_count", str(self.risk._daily_trade_count))
+        self._persist_pause_state()
+
+    def _persist_pause_state(self):
+        """Persist the operational pause state used by dashboard readers."""
+        self.cache.save_risk_state("trading_paused", str(bool(self.trading_paused)))
+        self.cache.save_risk_state("pause_reason", self.pause_reason)
+
+    def risk_snapshot(self, account=None, positions: dict | None = None) -> dict:
+        """Return the current operational risk state for monitoring surfaces.
+
+        This is deliberately separate from the analytical portfolio snapshot:
+        it describes live guardrails and their current utilisation, so a
+        dashboard can distinguish "portfolio VaR is high" from "the daemon is
+        currently refusing new orders".
+        """
+        equity = float(getattr(account, "total_equity", 0.0) or 0.0)
+        day_start = float(self.risk._day_start_equity or 0.0)
+        peak = float(self.risk._peak_equity or 0.0)
+        exposure = sum(
+            float(getattr(position, "market_value", 0.0) or 0.0)
+            for position in (positions or {}).values()
+            if float(getattr(position, "market_value", 0.0) or 0.0) > 0
+        )
+        return {
+            "as_of": date.today().isoformat(),
+            "equity": round(equity, 2),
+            "day_start_equity": round(day_start, 2),
+            "peak_equity": round(peak, 2),
+            "daily_pnl_pct": round((equity / day_start - 1) * 100, 2) if day_start > 0 else None,
+            "drawdown_pct": round((equity / peak - 1) * 100, 2) if peak > 0 else None,
+            "exposure_pct": round(exposure / equity * 100, 2) if equity > 0 else 0.0,
+            "daily_trade_count": int(self.risk._daily_trade_count),
+            "consecutive_losses": int(self.risk._consecutive_losses),
+            "limits": {
+                "max_daily_loss_pct": round(self.risk.max_daily_loss_pct * 100, 2),
+                "max_total_drawdown_pct": round(self.risk.max_total_drawdown_pct * 100, 2),
+                "max_total_exposure_pct": round(self.risk.max_total_exposure_pct * 100, 2),
+                "max_daily_trades": int(self.risk.max_daily_trades),
+                "max_consecutive_losses": int(self.risk.max_consecutive_losses),
+            },
+            "paused": bool(self.trading_paused),
+            "pause_reason": self.pause_reason,
+        }
 
     def check_global(self, account, positions: dict) -> bool:
         r = self.risk
@@ -123,6 +175,11 @@ class RiskController:
         # latch reset only at midnight.
         self.trading_paused = paused
         self.pause_reason = reason
+        self._persist_pause_state()
+        self.cache.save_risk_state(
+            "risk_operational_snapshot",
+            json.dumps(self.risk_snapshot(account, positions), ensure_ascii=False),
+        )
 
         if self.trading_paused:
             print(f"\n  !! 交易暂停: {self.pause_reason}")

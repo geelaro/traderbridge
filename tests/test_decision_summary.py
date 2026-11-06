@@ -56,6 +56,14 @@ class TestVerdict:
         assert code == "actionable"
         assert "1" in text
 
+    def test_top_risk_changes_action_to_no_chasing(self):
+        code, text = _verdict(
+            RiskLevel.GREEN, False, "", [{"signal": 1}], [],
+            top_risk_level="high",
+        )
+        assert code == "top_caution"
+        assert "追高" in text
+
 
 # ===================================================================
 # _rejected_signals — regime-block path (v1 scope)

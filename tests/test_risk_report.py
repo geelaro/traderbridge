@@ -139,6 +139,9 @@ class TestSectionContent:
         assert rl is not None
         # Has SPY / VIX metrics or a warning
         assert rl.metrics or rl.warnings
+        if rl.metrics:
+            assert "RSI14" in rl.metrics
+            assert "顶部风险" in rl.metrics
 
     def test_concentration_metrics(self, report):
         result = report.build()
