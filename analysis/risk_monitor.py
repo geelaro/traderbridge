@@ -260,6 +260,14 @@ def compute_risk_state(
         if qqq_detail.get("available"):
             details["QQQ"] = qqq_detail
 
+    spy_detail = details["SPY"]
+    if not spy_detail.get("available"):
+        return RiskState(
+            level=RiskLevel.YELLOW,
+            reasons=spy_detail.get("reasons", ["SPY 数据不可用, 默认黄"]),
+            indicators={"vix": round(vix_now, 2), "vix_source": vix_source},
+        )
+
     available = [detail for detail in details.values() if detail.get("available")]
     if not available:
         return RiskState(level=RiskLevel.YELLOW, reasons=["SPY/QQQ 数据不足, 默认黄"])

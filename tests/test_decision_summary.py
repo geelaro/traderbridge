@@ -15,12 +15,29 @@ import pytest
 from analysis.risk_monitor import RiskLevel
 from data.protocol import DataSource
 from dashboard.decision_summary import (
+    _live_risk_snapshot,
     _rejected_signals,
     _risk_delta,
     _verdict,
     build_decision_summary,
 )
 from utils.market_state import MarketRegime, Volatility
+
+
+class TestLiveRiskSnapshot:
+    def test_returns_snapshot_for_requested_day(self):
+        cache = MagicMock()
+        cache.load_risk_state.return_value = json.dumps({"as_of": "2026-11-07", "paused": True})
+
+        snapshot = _live_risk_snapshot(cache, as_of="2026-11-07")
+
+        assert snapshot["paused"] is True
+
+    def test_ignores_snapshot_from_another_day(self):
+        cache = MagicMock()
+        cache.load_risk_state.return_value = json.dumps({"as_of": "2026-11-06", "paused": True})
+
+        assert _live_risk_snapshot(cache, as_of="2026-11-07") is None
 
 
 # ===================================================================

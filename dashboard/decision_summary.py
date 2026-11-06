@@ -73,7 +73,7 @@ def build_decision_summary(config: dict, target_date, provider, cache) -> dict:
     rejected = _rejected_signals(config, market_state, signals, errors)
     risk_snapshot, risk_delta = _risk_delta(config, target_date, provider, cache, errors)
 
-    live_risk = _live_risk_snapshot(cache)
+    live_risk = _live_risk_snapshot(cache, as_of=end_ts.date().isoformat())
     trading_paused = (
         bool(live_risk.get("paused"))
         if live_risk is not None
@@ -227,14 +227,16 @@ def _risk_delta(config, target_date, provider, cache, errors):
         return None, None
 
 
-def _live_risk_snapshot(cache):
-    """Load the daemon's latest guardrail snapshot, if one exists."""
+def _live_risk_snapshot(cache, as_of=None):
+    """Load a guardrail snapshot only when it matches the requested day."""
     raw = cache.load_risk_state("risk_operational_snapshot")
     if not raw:
         return None
     try:
         value = json.loads(raw)
-        return value if isinstance(value, dict) else None
+        if not isinstance(value, dict) or value.get("as_of") != as_of:
+            return None
+        return value
     except (TypeError, ValueError):
         logger.warning("decision_summary: live risk snapshot is malformed")
         return None

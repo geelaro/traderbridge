@@ -55,6 +55,15 @@ class TestDegradedInputs:
         assert state.level == RiskLevel.YELLOW
         assert any("不足" in r for r in state.reasons)
 
+    def test_short_spy_with_sufficient_qqq_degrades_without_crashing(self):
+        spy = _synthetic_spy([400] * 219)
+        qqq = _synthetic_spy(np.linspace(300, 500, 300))
+
+        state = compute_risk_state(spy, _synthetic_vix(15.0), qqq_df=qqq)
+
+        assert state.level == RiskLevel.YELLOW
+        assert any("SPY 数据不足" in reason for reason in state.reasons)
+
 
 # ===================================================================
 # RED: any one of (SPY < MA200 - 3%, VIX > 30, 5d crash)
