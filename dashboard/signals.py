@@ -18,15 +18,15 @@ logger = get_logger("dashboard.signals")
 # Subtle backgrounds — picked so the badge reads at a glance without
 # screaming. Foreground stays dark for accessible contrast on all three.
 _RISK_THEME = {
-    RiskLevel.GREEN:  {"bg": "#d4edda", "border": "#28a745", "fg": "#155724", "label": "低风险"},
-    RiskLevel.YELLOW: {"bg": "#fff3cd", "border": "#ffc107", "fg": "#856404", "label": "警戒"},
-    RiskLevel.RED:    {"bg": "#f8d7da", "border": "#dc3545", "fg": "#721c24", "label": "高风险"},
+    RiskLevel.GREEN:  {"bg": "#d4edda", "border": "#198754", "fg": "#155724", "label": "GREEN · 低压力"},
+    RiskLevel.YELLOW: {"bg": "#fff3cd", "border": "#d39e00", "fg": "#664d03", "label": "YELLOW · 警戒"},
+    RiskLevel.RED:    {"bg": "#f8d7da", "border": "#dc3545", "fg": "#721c24", "label": "RED · 高压力"},
 }
 
 
 def render_risk_light(config, target_date, provider):
-    """Render downside risk, upside overbought, and top-risk consensus."""
-    st.subheader("市场风险灯")
+    """Render market sentiment plus a separate market-stress light."""
+    st.subheader("市场状态")
 
     lookback = config.get("scanner", {}).get("lookback_years", 3)
     start = (pd.Timestamp(target_date) - pd.DateOffset(years=max(lookback, 2))).strftime("%Y-%m-%d")
@@ -39,12 +39,19 @@ def render_risk_light(config, target_date, provider):
         st.info("无法加载 SPY/VIX 数据, 风险灯暂不可用")
         st.divider()
         return
+    try:
+        qqq_df = provider.get_daily("QQQ", start=start, end=end)
+    except Exception as exc:
+        logger.warning("QQQ market-state data fetch failed: %s", exc)
+        qqq_df = pd.DataFrame()
 
     # Try to overlay Yahoo realtime VIX (~15-minute delayed) so the badge
     # reflects intraday rather than yesterday's close. Failures fall back
     # to the EOD value from vix_df silently.
     live_vix = get_realtime_vix()
-    state = compute_risk_state(spy_df, vix_df, realtime_vix=live_vix)
+    state = compute_risk_state(
+        spy_df, vix_df, realtime_vix=live_vix, qqq_df=qqq_df,
+    )
     theme = _RISK_THEME[state.level]
 
     # Regime / volatility tag — uses the existing MarketStateClassifier
@@ -69,58 +76,39 @@ def render_risk_light(config, target_date, provider):
     except Exception as exc:
         logger.debug("regime tag unavailable: %s", exc)
 
-    # Top badge — wide colored card with emoji + label + regime tag
-    regime_html = (
-        f'<span style="margin-left:18px;font-size:0.95em;opacity:0.9;'
-        f'border:1px solid {theme["border"]};padding:2px 10px;border-radius:12px;">'
-        f'{regime_tag}</span>'
-    ) if regime_tag else ""
-    st.markdown(
-        f"""
-        <div style="background:{theme['bg']};border-left:6px solid {theme['border']};
-                    padding:14px 20px;border-radius:8px;margin-bottom:12px;
-                    color:{theme['fg']};">
-          <span style="font-size:1.6em;font-weight:bold;">{state.emoji} {theme['label']}</span>
-          {regime_html}
-          <span style="margin-left:18px;font-size:0.85em;opacity:0.75;">
-            截至 {state.indicators.get('as_of', '?')}
-          </span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    # Native Streamlit alerts keep the pressure state visually consistent
+    # with the rest of the dashboard and remain readable in dark mode.
+    stress_text = f"{state.emoji} {theme['label']}"
+    if regime_tag:
+        stress_text += f"  ·  {regime_tag}"
+    stress_text += f"  ·  截至 {state.indicators.get('as_of', '?')}"
+    if state.level == RiskLevel.GREEN:
+        st.success(stress_text)
+    elif state.level == RiskLevel.YELLOW:
+        st.warning(stress_text)
+    else:
+        st.error(stress_text)
 
-    # Indicator row
+    overall = state.sentiment_score
+    spy_sentiment = state.market_sentiments.get("SPY", {})
+    qqq_sentiment = state.market_sentiments.get("QQQ", {})
+    st.markdown("**市场情绪温度** · 0 极度超卖 · 50 中性 · 100 极度超买")
+    s1, s2, s3 = st.columns(3)
+    s1.metric("大盘整体", f"{overall:.1f}" if overall is not None else "—", state.sentiment_label)
+    s2.metric("SPY", f"{spy_sentiment.get('score', 0):.1f}" if spy_sentiment.get("score") is not None else "—", spy_sentiment.get("label", "数据不足"))
+    s3.metric("QQQ", f"{qqq_sentiment.get('score', 0):.1f}" if qqq_sentiment.get("score") is not None else "—", qqq_sentiment.get("label", "数据不可用"))
+
     ind = state.indicators
-    c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
-    c1.metric(
-        "SPY",
-        f"${ind.get('spy_close', 0):.2f}",
-        f"{ind.get('spy_vs_ma200_pct', 0):+.1f}% vs MA200",
-    )
-    c2.metric("SPY 5日", f"{ind.get('spy_5d_return_pct', 0):+.2f}%")
-    c3.metric("SPY 20日", f"{ind.get('spy_20d_return_pct', 0):+.2f}%")
-    c4.metric(
-        "SPY RSI14",
-        f"{ind.get('spy_rsi14', 0):.1f}",
-        delta="超买" if ind.get("overbought") else "正常",
-        delta_color="inverse" if ind.get("overbought") else "off",
-        help="RSI ≥70 为超买区, 只代表上涨过快, 不代表立即反转.",
-    )
-    c5.metric("SPY ADX", f"{ind.get('spy_adx', 0):.1f}")
+    st.markdown("**市场参考**")
+    ref_cols = st.columns(5)
+    ref_cols[0].metric("SPY", f"${ind.get('spy_close', 0):.2f}")
+    ref_cols[1].metric("SPY 5日", f"{ind.get('spy_5d_return_pct', 0):+.2f}%")
+    ref_cols[2].metric("SPY 20日", f"{ind.get('spy_20d_return_pct', 0):+.2f}%")
     vix_src = ind.get("vix_source", "eod")
     vix_label = "VIX (实时)" if vix_src == "realtime" else "VIX (昨收)"
-    c6.metric(
-        vix_label,
-        f"{ind.get('vix', 0):.2f}",
-        delta=None,
-        help=(
-            "<18 低波, 18-30 偏高, >30 极端恐慌. "
-            + ("Yahoo ~15min 延迟实时" if vix_src == "realtime" else "CBOE 官方收盘价")
-        ),
-    )
+    ref_cols[3].metric(vix_label, f"{ind.get('vix', 0):.2f}", help="<18 低波, 18-30 偏高, >30 极端恐慌")
 
-    # CNN Fear & Greed Index — sentiment 互补指标, 不参与 RED/YELLOW/GREEN 判定
+    # CNN Fear & Greed Index — sentiment 互补指标, 不参与压力判定。
     fg = get_fear_greed()
     if fg is not None:
         fg_score, fg_rating = fg
@@ -131,43 +119,46 @@ def render_risk_light(config, target_date, provider):
             "greed": "贪婪",
             "extreme greed": "极度贪婪",
         }.get(fg_rating, fg_rating)
-        c7.metric(
-            "F&G (CNN)",
-            f"{fg_score:.0f}",
-            delta=rating_zh,
-            delta_color="off",
-            help="CNN 恐惧贪婪指数. 0-25 极度恐慌, 25-45 恐慌, 45-55 中性, 55-75 贪婪, 75-100 极度贪婪. 数据源 production.dataviz.cnn.io JSON 接口",
-        )
+        ref_cols[4].metric("F&G (CNN)", f"{fg_score:.0f}", delta=rating_zh, delta_color="off")
     else:
-        c7.metric("F&G (CNN)", "—", delta="数据不可用", delta_color="off",
-                   help="CNN 接口暂时无响应 — 检查代理/网络")
+        ref_cols[4].metric("F&G (CNN)", "—", delta="数据不可用", delta_color="off")
 
-    top_label = {
-        "normal": "正常",
-        "elevated": "偏热",
-        "high": "顶部风险偏高",
-        "unknown": "数据不足",
-    }.get(state.top_risk_level, state.top_risk_level)
-    top_color = {"normal": "#198754", "elevated": "#b58105", "high": "#c0392b"}.get(
-        state.top_risk_level, "#6c757d"
-    )
-    st.markdown(
-        f"<div style='border-left:4px solid {top_color};padding:8px 12px;"
-        f"margin:8px 0;color:{top_color};'><b>大盘超买 / 顶部风险: {top_label}</b>"
-        f"<span style='margin-left:12px;color:#666;'>"
-        f"共振分数 {ind.get('top_risk_score', 0)}</span></div>",
-        unsafe_allow_html=True,
-    )
-    if state.top_risk_reasons:
-        with st.expander("查看超买与顶部风险依据"):
-            for reason in state.top_risk_reasons:
+    # Compact comparison table keeps the two market lenses visible together.
+    levels = state.market_states
+    risk_label = {"green": "GREEN · 低压力", "yellow": "YELLOW · 警戒", "red": "RED · 高压力"}
+    market_rows = []
+    for symbol, prefix in (("SPY", "spy"), ("QQQ", "qqq")):
+        market = levels.get(symbol, {})
+        market_rows.append({
+            "市场": symbol,
+            "压力": risk_label.get(market.get("level"), "数据不可用"),
+            "情绪": f"{market.get('sentiment_score', 0):.1f} · {market.get('sentiment_label', '数据不可用')}" if market else "数据不可用",
+            "收盘价": f"${ind.get(f'{prefix}_close', 0):.2f}" if ind.get(f"{prefix}_close") is not None else "—",
+            "MA200乖离": f"{ind.get(f'{prefix}_vs_ma200_pct', 0):+.1f}%" if ind.get(f"{prefix}_vs_ma200_pct") is not None else "—",
+            "5日": f"{ind.get(f'{prefix}_5d_return_pct', 0):+.2f}%" if ind.get(f"{prefix}_5d_return_pct") is not None else "—",
+            "20日": f"{ind.get(f'{prefix}_20d_return_pct', 0):+.2f}%" if ind.get(f"{prefix}_20d_return_pct") is not None else "—",
+            "RSI14": f"{ind.get(f'{prefix}_rsi14', 0):.1f}" if ind.get(f"{prefix}_rsi14") is not None else "—",
+        })
+    st.dataframe(pd.DataFrame(market_rows), hide_index=True, use_container_width=True)
+
+    with st.expander("查看判定依据与情绪分解"):
+        st.markdown("**压力判定**")
+        if state.reasons:
+            for reason in state.reasons:
                 st.markdown(f"- {reason}")
-
-    # Reason bullets
-    if state.reasons:
-        st.markdown("**判定依据**")
-        for r in state.reasons:
-            st.markdown(f"- {r}")
+        else:
+            st.caption("暂无压力判定依据")
+        st.markdown("**情绪分解**")
+        sentiment_rows = []
+        for symbol, item in (("SPY", spy_sentiment), ("QQQ", qqq_sentiment)):
+            components = item.get("components", {})
+            sentiment_rows.append({
+                "市场": symbol,
+                "RSI贡献": f"{components.get('rsi', 0):.1f}" if components else "—",
+                "MA200乖离贡献": f"{components.get('ma200_extension', 0):.1f}" if components else "—",
+                "20日动量贡献": f"{components.get('momentum_20d', 0):.1f}" if components else "—",
+            })
+        st.dataframe(pd.DataFrame(sentiment_rows), hide_index=True, use_container_width=True)
 
     st.divider()
 

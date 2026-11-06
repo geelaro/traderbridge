@@ -186,7 +186,15 @@ class RiskReport:
         except Exception:
             live = None
 
-        state = compute_risk_state(spy_df, vix_df, realtime_vix=live)
+        try:
+            qqq_df = self.provider.get_daily(
+                "QQQ",
+                start=(pd.Timestamp(self.target_date) - pd.DateOffset(years=2)).strftime("%Y-%m-%d"),
+                end=pd.Timestamp(self.target_date).strftime("%Y-%m-%d"),
+            )
+        except Exception:
+            qqq_df = pd.DataFrame()
+        state = compute_risk_state(spy_df, vix_df, realtime_vix=live, qqq_df=qqq_df)
         ind = state.indicators or {}
         label = {"green": "🟢 GREEN", "yellow": "🟡 YELLOW",
                  "red": "🔴 RED"}.get(state.level.value, state.level.value)
@@ -212,6 +220,15 @@ class RiskReport:
                 "SPY 20日": f"{ind.get('spy_20d_return_pct', 0):+.2f}%",
                 "RSI14": f"{ind.get('spy_rsi14', 0):.1f}",
                 "顶部风险": top_label,
+                "大盘情绪": (
+                    f"{state.sentiment_score:.1f}/100 {state.sentiment_label}"
+                    if state.sentiment_score is not None else "数据不足"
+                ),
+                "QQQ 情绪": (
+                    f"{ind.get('qqq_sentiment_score', 0):.1f}/100 "
+                    f"{ind.get('qqq_sentiment_label', '数据不足')}"
+                    if ind.get("qqq_sentiment_score") is not None else "数据不可用"
+                ),
                 "SPY ADX": f"{ind.get('spy_adx', 0):.1f}",
                 "VIX": f"{ind.get('vix', 0):.2f} "
                        f"({'实时' if ind.get('vix_source') == 'realtime' else '昨收'})",

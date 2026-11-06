@@ -204,6 +204,21 @@ class TestTopRisk:
         assert state.top_risk_level != "high"
 
 
+class TestMarketSentiment:
+    def test_numeric_sentiment_separates_spy_and_qqq(self):
+        spy = _synthetic_spy(np.linspace(300, 500, 300))
+        qqq = _synthetic_spy(np.linspace(500, 300, 300))
+        state = compute_risk_state(spy, _synthetic_vix(15.0), qqq_df=qqq)
+
+        assert 0 <= state.sentiment_score <= 100
+        assert state.sentiment_label in {"极度超卖", "超卖", "中性", "超买", "极度超买"}
+        assert state.market_sentiments["SPY"]["score"] > 65
+        assert state.market_sentiments["QQQ"]["score"] < 35
+        assert state.indicators["spy_sentiment_score"] > 65
+        assert state.indicators["qqq_sentiment_score"] < 35
+        assert "rsi" in state.market_sentiments["SPY"]["components"]
+
+
 # ===================================================================
 # Realtime VIX override
 # ===================================================================

@@ -425,8 +425,15 @@ class LiveTrader:
         end_str = end.strftime("%Y-%m-%d")
         spy_df = self.provider.get_daily("SPY", start=start, end=end_str)
         vix_df = self.provider.get_daily("^VIX", start=start, end=end_str)
+        try:
+            qqq_df = self.provider.get_daily("QQQ", start=start, end=end_str)
+        except Exception as exc:
+            logger.warning("QQQ 市场状态数据不可用: %s", exc)
+            qqq_df = pd.DataFrame()
         live_vix = get_realtime_vix()  # None on failure → falls back to EOD
-        state = compute_risk_state(spy_df, vix_df, realtime_vix=live_vix)
+        state = compute_risk_state(
+            spy_df, vix_df, realtime_vix=live_vix, qqq_df=qqq_df,
+        )
         vix_value = state.indicators.get("vix") if state else None
         return state, vix_value
 

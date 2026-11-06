@@ -63,7 +63,10 @@ def build_decision_summary(config: dict, target_date, provider, cache) -> dict:
     end_ts = pd.Timestamp(target_date)
     errors: list[str] = []
 
-    risk_level, risk_reasons, market_state, top_risk_level, top_risk_reasons = _risk_and_regime(
+    (
+        risk_level, risk_reasons, market_state, top_risk_level,
+        top_risk_reasons, sentiment_score, sentiment_label,
+    ) = _risk_and_regime(
         config, end_ts, provider, errors,
     )
     signals = _today_signals(config, end_ts, provider, cache, errors)
@@ -94,6 +97,8 @@ def build_decision_summary(config: dict, target_date, provider, cache) -> dict:
         "risk_reasons": risk_reasons,
         "top_risk_level": top_risk_level,
         "top_risk_reasons": top_risk_reasons,
+        "sentiment_score": sentiment_score,
+        "sentiment_label": sentiment_label,
         "regime": market_state.regime if market_state else None,
         "volatility": market_state.volatility if market_state else None,
         "signals": signals,
@@ -121,17 +126,25 @@ def _risk_and_regime(config, end_ts, provider, errors):
     try:
         spy_df = provider.get_daily("SPY", start=start, end=end)
         vix_df = provider.get_daily("^VIX", start=start, end=end)
+        try:
+            qqq_df = provider.get_daily("QQQ", start=start, end=end)
+        except Exception as exc:
+            logger.warning("decision_summary: QQQ 数据不可用: %s", exc)
+            qqq_df = pd.DataFrame()
         live_vix = get_realtime_vix()
-        state = compute_risk_state(spy_df, vix_df, realtime_vix=live_vix)
+        state = compute_risk_state(
+            spy_df, vix_df, realtime_vix=live_vix, qqq_df=qqq_df,
+        )
         market_state = MarketStateClassifier(spy_df).classify()
         return (
             state.level, state.reasons, market_state,
             state.top_risk_level, state.top_risk_reasons,
+            state.sentiment_score, state.sentiment_label,
         )
     except Exception as exc:
         logger.warning("decision_summary: risk/regime 计算失败: %s", exc)
         errors.append("风险灯/regime 数据不可用")
-        return None, [], None, "unknown", []
+        return None, [], None, "unknown", [], None, "unknown"
 
 
 def _today_signals(config, end_ts, provider, cache, errors):
@@ -249,15 +262,6 @@ def _verdict(
 # Rendering
 # ---------------------------------------------------------------------------
 
-_VERDICT_THEME = {
-    "paused":     {"bg": "#e2e3e5", "border": "#6c757d", "fg": "#383d41"},
-    "red":        {"bg": "#f8d7da", "border": "#dc3545", "fg": "#721c24"},
-    "no_signal":  {"bg": "#e2e3e5", "border": "#6c757d", "fg": "#383d41"},
-    "all_blocked": {"bg": "#fff3cd", "border": "#ffc107", "fg": "#856404"},
-    "top_caution": {"bg": "#fff3cd", "border": "#d39e00", "fg": "#6b4f00"},
-    "actionable": {"bg": "#d4edda", "border": "#28a745", "fg": "#155724"},
-}
-
 _REGIME_LABEL = {
     "TRENDING_UP": "上升趋势", "TRENDING_DOWN": "下降趋势",
     "RANGING": "震荡", "TRANSITIONAL": "过渡期",
@@ -268,17 +272,15 @@ def render_decision_summary(summary: dict) -> None:
     """Render the decision-summary card. Pure rendering — no computation."""
     st.subheader("今日决策摘要")
 
-    theme = _VERDICT_THEME.get(summary["verdict_code"], _VERDICT_THEME["no_signal"])
-    st.markdown(
-        f"""
-        <div style="background:{theme['bg']};border-left:6px solid {theme['border']};
-                    padding:14px 20px;border-radius:8px;margin-bottom:12px;
-                    color:{theme['fg']};font-size:1.3em;font-weight:bold;">
-          {summary['verdict_text']}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    code = summary["verdict_code"]
+    if code in {"paused", "red"}:
+        st.error(summary["verdict_text"])
+    elif code in {"all_blocked", "top_caution"}:
+        st.warning(summary["verdict_text"])
+    elif code == "actionable":
+        st.success(summary["verdict_text"])
+    else:
+        st.info(summary["verdict_text"])
 
     if summary["errors"]:
         st.caption("⚠ " + " / ".join(summary["errors"]))
@@ -291,6 +293,11 @@ def render_decision_summary(summary: dict) -> None:
         regime = summary["regime"]
         regime_label = _REGIME_LABEL.get(regime.name, regime.name) if regime else "—"
         st.metric("风险灯 × Regime", f"{level_label} × {regime_label}")
+        if summary.get("sentiment_score") is not None:
+            st.caption(
+                f"大盘情绪 {summary['sentiment_score']:.1f}/100 "
+                f"({summary.get('sentiment_label', '未知')})"
+            )
         if summary.get("top_risk_level") == "high":
             st.caption("顶部风险偏高: 超买 / 乖离 / 短期涨幅出现共振，避免追高")
         with st.expander("判定依据"):
