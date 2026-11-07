@@ -114,18 +114,74 @@ class TestFutuBrokerInterface:
         assert issubclass(FutuBroker, Broker)
 
     def test_get_account_no_connection(self):
-        """Without FutuOpenD, returns initial state."""
+        """Without a connected trade context, account state is unavailable."""
         broker = FutuBroker(initial_cash=10000)
-        account = broker.get_account()
-        assert isinstance(account, Account)
-        assert account.total_equity == 10000
-        assert account.available_cash == 10000
-        assert account.currency == "USD"
+        with pytest.raises(ConnectionError, match="no trade contexts"):
+            broker.get_account()
 
     def test_get_positions_no_connection(self):
         broker = FutuBroker()
-        positions = broker.get_positions()
-        assert positions == []
+        with pytest.raises(ConnectionError, match="no trade contexts"):
+            broker.get_positions()
+
+    def test_warmup_fails_if_any_market_context_is_missing(self):
+        broker = FutuBroker()
+        with patch.object(
+                broker, "_get_trade_ctx",
+                side_effect=lambda symbol: object() if symbol == "AAPL" else None):
+            assert broker.warmup(["AAPL", "HK.00700"]) is False
+
+    def test_get_account_api_failure_raises(self):
+        broker = FutuBroker()
+        ctx = MagicMock()
+        ctx.accinfo_query.return_value = (-1, "account unavailable")
+        broker._trade_ctxs[TrdMarket.US] = ctx
+
+        with pytest.raises(ConnectionError, match="account snapshot unavailable"):
+            broker.get_account()
+
+    def test_get_account_returns_valid_snapshot(self):
+        import pandas as pd
+
+        broker = FutuBroker(initial_cash=10000)
+        ctx = MagicMock()
+        ctx.accinfo_query.return_value = (0, pd.DataFrame([{
+            "total_assets": 12500, "cash": 8000, "frozen_cash": 500,
+        }]))
+        broker._trade_ctxs[TrdMarket.US] = ctx
+
+        account = broker.get_account()
+
+        assert isinstance(account, Account)
+        assert account.total_equity == 12500
+        assert account.available_cash == 8000
+        assert account.frozen_margin == 500
+        assert account.total_pnl == 2500
+
+    def test_get_positions_api_failure_raises(self):
+        broker = FutuBroker()
+        ctx = MagicMock()
+        ctx.position_list_query.return_value = (-1, "positions unavailable")
+        broker._trade_ctxs[TrdMarket.US] = ctx
+
+        with pytest.raises(ConnectionError, match="positions snapshot unavailable"):
+            broker.get_positions()
+
+    def test_get_positions_does_not_return_partial_market_snapshot(self):
+        import pandas as pd
+
+        broker = FutuBroker()
+        us_ctx = MagicMock()
+        us_ctx.position_list_query.return_value = (0, pd.DataFrame([{
+            "code": "US.AAPL", "qty": 10, "cost_price": 100,
+        }]))
+        hk_ctx = MagicMock()
+        hk_ctx.position_list_query.return_value = (-1, "market unavailable")
+        broker._trade_ctxs[TrdMarket.US] = us_ctx
+        broker._trade_ctxs[TrdMarket.HK] = hk_ctx
+
+        with pytest.raises(ConnectionError, match="positions snapshot unavailable"):
+            broker.get_positions()
 
     def test_cancel_order_no_connection(self):
         broker = FutuBroker()

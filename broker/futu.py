@@ -244,44 +244,57 @@ class FutuBroker(Broker):
         """Pre-create trade contexts for the markets of given symbols.
 
         Call before get_account()/get_positions() to ensure trade contexts exist.
-        Returns True if at least one trade context was created.
+        Returns True only when every requested market context is available.
         """
-        for sym in symbols:
-            self._get_trade_ctx(sym)
-        return len(self._trade_ctxs) > 0
+        market_symbols = {}
+        for symbol in symbols:
+            market_symbols.setdefault(_to_market(symbol), symbol)
+        if not market_symbols:
+            return False
+
+        failed_markets = [
+            market for market, symbol in market_symbols.items()
+            if self._get_trade_ctx(symbol) is None
+        ]
+        if failed_markets:
+            logger.error("Futu warmup failed for markets: %s", failed_markets)
+            return False
+        return True
 
     def get_account(self) -> Account:
         """Query account info from Futu — aggregates across all markets."""
+        if not self._trade_ctxs:
+            raise ConnectionError("FutuBroker has no trade contexts; warmup failed or was skipped")
+
         equity_parts = []
         cash_parts = []
         frozen = 0.0
-        has_data = False
 
         for market, ctx in list(self._trade_ctxs.items()):
             if ctx is None:
-                continue
+                raise ConnectionError(f"Futu trade context missing for market {market}")
             try:
                 ret, data = ctx.accinfo_query(
                     trd_env=TrdEnv.SIMULATE,
                     acc_id=self._acc_id,
                 )
-                if ret == 0 and not data.empty:
-                    has_data = True
-                    row = data.iloc[0]
-                    equity_parts.append(float(row.get("total_assets", 0)))
-                    cash_parts.append(float(row.get("cash", 0)))
-                    frozen += float(row.get("frozen_cash", 0))
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Futu account query failed for market %s: %s", market, exc)
+                raise ConnectionError(
+                    f"Futu account query failed for market {market}"
+                ) from exc
+            if ret != 0 or data is None or data.empty:
+                raise ConnectionError(
+                    f"Futu account snapshot unavailable for market {market}: {data}"
+                )
+            row = data.iloc[0]
+            equity_parts.append(float(row.get("total_assets", 0)))
+            cash_parts.append(float(row.get("cash", 0)))
+            frozen += float(row.get("frozen_cash", 0))
 
-        if has_data:
-            total_equity = sum(equity_parts)
-            available_cash = sum(cash_parts)
-        else:
-            total_equity = self._initial_cash
-            available_cash = self._initial_cash
-
-        total_pnl = total_equity - self._initial_cash if has_data else 0.0
+        total_equity = sum(equity_parts)
+        available_cash = sum(cash_parts)
+        total_pnl = total_equity - self._initial_cash
 
         return Account(
             total_equity=total_equity,
@@ -297,36 +310,44 @@ class FutuBroker(Broker):
 
     def get_positions(self) -> List[Position]:
         """Query current positions from Futu."""
+        if not self._trade_ctxs:
+            raise ConnectionError("FutuBroker has no trade contexts; warmup failed or was skipped")
+
         results = []
         for market, ctx in list(self._trade_ctxs.items()):
             if ctx is None:
-                continue
+                raise ConnectionError(f"Futu trade context missing for market {market}")
             try:
                 ret, data = ctx.position_list_query(
                     trd_env=TrdEnv.SIMULATE,
                     acc_id=self._acc_id,
                 )
-                if ret != 0 or data.empty:
+            except Exception as exc:
+                logger.warning("Futu positions query failed for market %s: %s", market, exc)
+                raise ConnectionError(
+                    f"Futu positions query failed for market {market}"
+                ) from exc
+            if ret != 0 or data is None:
+                raise ConnectionError(
+                    f"Futu positions snapshot unavailable for market {market}: {data}"
+                )
+            for _, row in data.iterrows():
+                futu_sym = row.get("code", "")
+                sym = futu_sym.split(".")[-1]  # US.AAPL → AAPL
+                qty = int(row.get("qty", 0))
+                if qty == 0:
                     continue
-                for _, row in data.iterrows():
-                    futu_sym = row.get("code", "")
-                    sym = futu_sym.split(".")[-1]  # US.AAPL → AAPL
-                    qty = int(row.get("qty", 0))
-                    if qty == 0:
-                        continue
-                    avg_price = float(row.get("cost_price", 0))
-                    last = self.last_prices.get(sym, avg_price)
-                    mv = qty * last
-                    upnl = (last - avg_price) * qty
-                    results.append(Position(
-                        symbol=sym,
-                        quantity=qty,
-                        avg_price=avg_price,
-                        market_value=mv,
-                        unrealized_pnl=upnl,
-                    ))
-            except Exception:
-                pass
+                avg_price = float(row.get("cost_price", 0))
+                last = self.last_prices.get(sym, avg_price)
+                mv = qty * last
+                upnl = (last - avg_price) * qty
+                results.append(Position(
+                    symbol=sym,
+                    quantity=qty,
+                    avg_price=avg_price,
+                    market_value=mv,
+                    unrealized_pnl=upnl,
+                ))
         return results
 
     # ------------------------------------------------------------------

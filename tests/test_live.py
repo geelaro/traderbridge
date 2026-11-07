@@ -1102,6 +1102,29 @@ class TestRunIntegration:
         orders = trader.run(target_date="2021-03-01")
         assert isinstance(orders, list)
 
+    def test_run_aborts_when_broker_warmup_fails(self):
+        trader = self._make_trader()
+        trader.broker.warmup = lambda symbols: False
+
+        with pytest.raises(ConnectionError, match="warmup failed"):
+            trader.run(target_date="2021-03-01")
+
+        assert trader.cache._batch_mode is False
+
+    def test_run_commits_batch_after_cycle_exception(self):
+        trader = self._make_trader()
+
+        def fail_cycle(target_date):
+            trader.cache.save_risk_state("partial_tick", "saved")
+            raise RuntimeError("cycle failed")
+
+        trader._run_cycle = fail_cycle
+        with pytest.raises(RuntimeError, match="cycle failed"):
+            trader.run(target_date="2021-03-01")
+
+        assert trader.cache._batch_mode is False
+        assert trader.cache.load_risk_state("partial_tick") == "saved"
+
     def test_run_generates_buy_order(self, ohlcv):
         """A buy signal produces a BUY order."""
         trader = self._make_trader()

@@ -148,6 +148,13 @@ class LiveTrader:
             target_date = date.today().isoformat()
 
         self.cache.enable_batch()
+        try:
+            return self._run_cycle(target_date)
+        finally:
+            self.cache.commit_batch()
+
+    def _run_cycle(self, target_date: str) -> List[Order]:
+        """Execute the tick with cache writes batched by :meth:`run`."""
 
         print(f"\n{'=' * 60}")
         print(f"  LiveTrader — {target_date}")
@@ -156,7 +163,10 @@ class LiveTrader:
 
         # 1. Warmup broker (trade contexts, connections)
         self._watchlist_symbols = [item["symbol"] for item in self.config.get("watchlist", [])]
-        self.broker.warmup(self._watchlist_symbols)
+        if not self.broker.warmup(self._watchlist_symbols):
+            raise ConnectionError(
+                f"{self.broker.name} broker warmup failed; refusing to trade on incomplete state"
+            )
 
         # 2. Prime market prices before broker snapshots.  Some broker
         # adapters compute position market value from last_prices.
@@ -274,7 +284,6 @@ class LiveTrader:
             logger.info("无新订单 — 信号与持仓一致")
 
         print(f"\n  {'=' * 60}\n")
-        self.cache.commit_batch()
         return submitted
 
     # ------------------------------------------------------------------

@@ -116,6 +116,8 @@ class Broker(ABC):
 
     Safety rules for implementations:
     - Never raise from submit_order — return Order with REJECTED status on failure
+    - get_account/get_positions must raise when a complete broker snapshot is unavailable;
+      never substitute fabricated cash or an empty position list for a query failure
     - get_positions MUST return the broker's ground-truth, not local cache
     - All monetary values in the account's base currency
     """
