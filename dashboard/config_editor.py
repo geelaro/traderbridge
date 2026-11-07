@@ -6,6 +6,18 @@ from utils.env import save_toml
 from strategy import STRATEGY_MAP
 
 
+def _has_duplicate_symbol(watchlist, symbol, exclude_index=None):
+    normalized = symbol.strip().upper()
+    if not normalized:
+        return False
+    return any(
+        index != exclude_index
+        and isinstance(item.get("symbol"), str)
+        and item["symbol"].strip().upper() == normalized
+        for index, item in enumerate(watchlist)
+    )
+
+
 def render_config_editor(config: dict):
     """Render a watchlist configuration editor tab."""
     st.header("Watchlist 配置管理")
@@ -47,7 +59,9 @@ def render_config_editor(config: dict):
         default_active = edit_item.get("active", strategy_names[0]) if edit_item else strategy_names[0]
         default_monitor = edit_item.get("monitor", []) if edit_item else []
 
-        symbol = col1.text_input("代码", value=default_sym, placeholder="AAPL").upper()
+        symbol = col1.text_input(
+            "代码", value=default_sym, placeholder="AAPL",
+        ).strip().upper()
         active_strat = col2.selectbox(
             "主策略",
             strategy_names,
@@ -60,9 +74,18 @@ def render_config_editor(config: dict):
         )
 
         submitted = st.form_submit_button("保存")
-        if submitted and symbol:
+        if submitted:
+            if not symbol:
+                st.error("代码不能为空")
+                return
+            if _has_duplicate_symbol(
+                    watchlist, symbol,
+                    exclude_index=edit_idx if edit_item is not None else None):
+                st.error(f"{symbol} 已存在")
+                return
+
             new_item = {
-                "symbol": symbol.upper(),
+                "symbol": symbol,
                 "name": edit_item.get("name", symbol) if edit_item else symbol,
                 "active": active_strat,
                 "monitor": monitor_strats,
@@ -71,10 +94,7 @@ def render_config_editor(config: dict):
             if edit_item is not None:
                 watchlist[edit_idx] = new_item
             else:
-                if any(i["symbol"] == symbol for i in watchlist):
-                    st.error(f"{symbol} 已存在")
-                else:
-                    watchlist.append(new_item)
+                watchlist.append(new_item)
 
             config["watchlist"] = watchlist
             save_toml(config_path, config)
