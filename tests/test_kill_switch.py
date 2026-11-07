@@ -125,13 +125,25 @@ class TestTrigger:
         assert risk_ctrl.trading_paused is True
         assert "Kill Switch" in risk_ctrl.pause_reason
 
-    def test_dry_run_does_not_submit(self, kill_switch, broker):
+    def test_dry_run_is_read_only(
+            self, kill_switch, broker, risk_ctrl, notifier, temp_cache):
         broker.get_positions.return_value = [_position("AAPL", 100)]
         result = kill_switch.trigger("dry test", dry_run=True)
         assert result["dry_run"] is True
+        assert result["status"] == "preview"
+        assert result["orders"] == [{
+            "symbol": "AAPL", "side": "SELL", "qty": 100,
+            "status": "DRY_RUN", "order_id": "",
+        }]
         broker.submit_order.assert_not_called()
-        # But it's still recorded as triggered (idempotent flag set)
-        assert kill_switch.is_active is True
+        assert risk_ctrl.trading_paused is False
+        risk_ctrl.persist_state.assert_not_called()
+        assert kill_switch.is_active is False
+        assert temp_cache.load_alert_history(
+            days=1, alert_type="kill_switch",
+        ) == []
+        assert temp_cache.query_decisions(days=1, decision_type="kill_switch") == []
+        notifier.kill_switch_card.assert_not_called()
 
     def test_broker_exception_recorded_as_error(self, kill_switch, broker):
         broker.get_positions.return_value = [

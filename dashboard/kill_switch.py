@@ -105,14 +105,19 @@ def render_kill_switch(broker, risk_ctrl, notifier, cache):
             placeholder="例如: 闪崩 / 突发地缘 / VIX 暴涨 / ...",
         )
 
+    preview = st.session_state.get("_ks_dry_run_result")
+    if preview and preview.get("reason") != reason.strip():
+        st.session_state.pop("_ks_dry_run_result", None)
+
     armed = confirm.strip() == "CONFIRM" and reason.strip()
 
     col1, col2 = st.columns(2)
     with col1:
         if st.button("🚨 紧急平仓全部 (实盘下单)",
                      type="primary", disabled=not armed):
+            st.session_state.pop("_ks_dry_run_result", None)
             with st.spinner("Triggering kill switch..."):
-                result = ks.trigger(reason)
+                result = ks.trigger(reason.strip())
             st.success(
                 f"Kill Switch 已触发. 下单 {len(result['orders'])} 笔, "
                 f"错误 {len(result['errors'])}. 飞书已推送."
@@ -123,10 +128,14 @@ def render_kill_switch(broker, risk_ctrl, notifier, cache):
         if st.button("Dry Run (预演, 不实际下单)",
                      type="secondary", disabled=not armed):
             with st.spinner("Dry-run..."):
-                result = ks.trigger(reason, dry_run=True)
-            st.info("Dry Run 完成 — 实盘动作未执行")
-            st.json(result)
-            st.rerun()
+                st.session_state["_ks_dry_run_result"] = ks.trigger(
+                    reason.strip(), dry_run=True,
+                )
+
+    preview = st.session_state.get("_ks_dry_run_result")
+    if preview:
+        st.info("Dry Run 完成 — 未下单，未改变交易状态")
+        st.json(preview)
 
     st.divider()
     _render_recent_history(cache)

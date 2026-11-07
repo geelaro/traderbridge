@@ -121,15 +121,17 @@ class KillSwitch:
         reason : str
             Free-text reason (audit + notification body).  Required.
         dry_run : bool
-            If True, records the intended orders but doesn't actually
-            submit them.  Used by dashboard preview / tests.
+            If True, returns intended orders without submitting them or
+            changing trading state, audit history, metrics, or
+            notifications.
 
         Returns
         -------
         dict::
 
             {
-                "status": "triggered" | "already_active" | "no_positions",
+                "status": "triggered" | "preview" | "already_active" |
+                           "no_positions",
                 "reason": str,
                 "n_positions": int,
                 "orders": list[dict],   # one per attempted sell
@@ -160,15 +162,18 @@ class KillSwitch:
         orders: list = []
         errors: list = []
 
-        # Reading positions must NEVER throw out of trigger() — that would
-        # leave risk_ctrl.trading_paused un-set, _KEY_STATE un-set, and the
-        # Feishu alert un-sent, which is the worst possible failure mode
-        # for a Kill Switch.  Capture the failure into the audit trail and
-        # continue with the pause+notify steps below.
+        # Reading positions must NEVER throw out of trigger(). A live trigger
+        # still proceeds to pause and notify if the broker is unavailable.
         try:
             positions = list(self.broker.get_positions() or [])
         except Exception as exc:
-            logger.exception("KillSwitch: broker.get_positions() failed")
+            if dry_run:
+                logger.warning(
+                    "KillSwitch dry-run: broker.get_positions() failed",
+                    exc_info=True,
+                )
+            else:
+                logger.exception("KillSwitch: broker.get_positions() failed")
             errors.append({
                 "symbol": "*",
                 "error": f"get_positions failed: {type(exc).__name__}: {exc}",
@@ -204,15 +209,29 @@ class KillSwitch:
                         "order_id": result.order_id,
                     })
             except Exception as exc:
-                # logger.exception (ERROR level) is INTENTIONAL here — Kill
-                # Switch is a safety-critical path and a per-symbol
-                # liquidation failure warrants Feishu attention via
-                # NotifyLogHandler (when installed in live_trader.py).
-                # See AGENTS.md "Critical design rules" §6.
-                logger.exception("KillSwitch: failed to liquidate %s", pos.symbol)
+                if dry_run:
+                    logger.warning(
+                        "KillSwitch dry-run: failed to prepare %s", pos.symbol,
+                        exc_info=True,
+                    )
+                else:
+                    # A live liquidation failure warrants Feishu attention
+                    # via NotifyLogHandler. See AGENTS.md, rule 6.
+                    logger.exception("KillSwitch: failed to liquidate %s", pos.symbol)
                 errors.append({"symbol": pos.symbol, "error": str(exc)})
 
         ts = datetime.now().isoformat(timespec="seconds")
+        payload = {
+            "reason": reason,
+            "n_positions": len(positions),
+            "orders": orders,
+            "errors": errors,
+            "dry_run": dry_run,
+            "triggered_at": ts,
+        }
+        if dry_run:
+            status = "preview" if positions else "no_positions"
+            return {"status": status, **payload}
 
         # Pause trading so the daemon doesn't open new positions
         try:
@@ -241,14 +260,6 @@ class KillSwitch:
             logger.warning("KillSwitch: legacy state mirror failed", exc_info=True)
 
         # Audit trail
-        payload = {
-            "reason": reason,
-            "n_positions": len(positions),
-            "orders": orders,
-            "errors": errors,
-            "dry_run": dry_run,
-            "triggered_at": ts,
-        }
         try:
             self.cache.record_alert("kill_switch", payload)
         except Exception:
@@ -281,7 +292,7 @@ class KillSwitch:
         # Push Feishu card (best-effort)
         self._notify(reason, len(positions), orders, errors, dry_run)
 
-        # Metrics — count manual + dry-run separately for ops dashboard.
+        # Count live triggers for the ops dashboard.
         try:
             from utils import metrics_server
             metrics_server.incr(
