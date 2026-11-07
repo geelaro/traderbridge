@@ -138,11 +138,23 @@ class TestNotifierWebhook:
             assert result is False
 
     def test_send_webhook_exception(self):
-        nf = Notifier(async_mode=False, url="https://hooks.example.com/test")
+        import logging
+        from utils.notify import NotifyLogHandler
 
-        with patch("utils.notify.requests.post", side_effect=Exception("timeout")):
-            result = nf.text("hello")
-            assert result is False
+        nf = Notifier(async_mode=False, url="https://hooks.example.com/test")
+        callback = MagicMock()
+        handler = NotifyLogHandler(callback, level=logging.ERROR)
+        logger = logging.getLogger("utils.notify")
+        logger.addHandler(handler)
+
+        try:
+            with patch("utils.notify.requests.post", side_effect=Exception("timeout")):
+                result = nf.text("hello")
+        finally:
+            logger.removeHandler(handler)
+
+        assert result is False
+        callback.error.assert_not_called()
 
     def test_send_card_via_webhook(self):
         nf = Notifier(async_mode=False, url="https://hooks.example.com/test")

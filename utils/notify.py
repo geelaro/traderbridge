@@ -148,7 +148,7 @@ class Notifier:
             try:
                 self._send(payload)
             except Exception:
-                logger.exception("通知消费异常")
+                logger.warning("通知消费异常", exc_info=True)
 
     def stop(self):
         self._stop_event.set()
@@ -507,7 +507,7 @@ class Notifier:
             else:
                 logger.warning("飞书 webhook HTTP %d: %s", r.status_code, r.text[:100])
         except Exception as e:
-            logger.error("飞书 webhook 发送失败: %s", e)
+            logger.warning("飞书 webhook 发送失败: %s", e)
         return False
 
     def _send_app(self, payload: dict) -> bool:
@@ -548,7 +548,7 @@ class Notifier:
             else:
                 logger.warning("飞书 app HTTP %d: %s", r.status_code, r.text[:100])
         except Exception as e:
-            logger.error("飞书 app 发送失败: %s", e)
+            logger.warning("飞书 app 发送失败: %s", e)
         return False
 
     def _get_app_token(self) -> Optional[str]:
@@ -573,7 +573,7 @@ class Notifier:
             else:
                 logger.warning("飞书 token HTTP %d", r.status_code)
         except Exception as e:
-            logger.error("飞书 token 请求异常: %s", e)
+            logger.warning("飞书 token 请求异常: %s", e)
         return None
 
     @staticmethod
