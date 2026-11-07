@@ -78,6 +78,21 @@ class TestRetry:
             ))
         assert inner.submit_order.call_count == 1  # no retry
 
+    def test_submit_order_timeout_is_not_retried(self):
+        """A timeout may follow broker acceptance, so retrying could duplicate."""
+        inner = _real_broker()
+        inner.submit_order.side_effect = TimeoutError("response lost")
+        rb = RetryingBroker(inner, max_retries=3)
+        order = Order(
+            symbol="X", side=OrderSide.BUY,
+            order_type=OrderType.MARKET, quantity=1,
+        )
+
+        with pytest.raises(TimeoutError, match="response lost"):
+            rb.submit_order(order)
+
+        inner.submit_order.assert_called_once_with(order)
+
 
 class TestCircuitBreaker:
     def test_opens_after_threshold(self):

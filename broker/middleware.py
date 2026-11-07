@@ -24,8 +24,8 @@ Example
 
 Design
 ------
-- Wraps the network-touching methods (get_account / get_positions /
-  submit_order / cancel_order / get_order / warmup).
+- Wraps network-touching broker methods.  Order submission is never
+  retried automatically because a timeout can leave its outcome ambiguous.
 - Retries on requests.RequestException-like / TimeoutError /
   ConnectionError / OSError.
 - Exponential backoff: ``base_delay * 2**attempt``, capped at ``max_delay``.
@@ -127,7 +127,11 @@ class RetryingBroker:
         return self._call("get_positions", self._inner.get_positions)
 
     def submit_order(self, order: Order) -> Order:
-        return self._call("submit_order", self._inner.submit_order, order)
+        # A timeout may happen after the broker accepted the order.  Retrying
+        # could place a duplicate, so only replay read/idempotent operations.
+        return self._call(
+            "submit_order", self._inner.submit_order, order, retry=False,
+        )
 
     def cancel_order(self, order_id: str) -> bool:
         return self._call("cancel_order", self._inner.cancel_order, order_id)
@@ -182,23 +186,31 @@ class RetryingBroker:
                 _maybe_metric_incr("broker_circuit_open_total",
                                    {"broker": self._inner.name})
 
-    def _call(self, op: str, fn, *args, **kwargs):
+    def _call(self, op: str, fn, *args, retry: bool = True, **kwargs):
         """Run ``fn(*args)`` with retry + circuit breaker semantics."""
         self._check_circuit()
         last_exc: Optional[Exception] = None
-        for attempt in range(self._max_retries + 1):
+        max_attempts = self._max_retries + 1 if retry else 1
+        for attempt in range(max_attempts):
             try:
                 result = fn(*args, **kwargs)
                 self._record_success()
                 return result
             except _RETRYABLE as exc:
                 last_exc = exc
+                if not retry:
+                    logger.warning(
+                        "Broker '%s' %s failed; not retrying because the "
+                        "operation outcome may be ambiguous: %s",
+                        self._inner.name, op, exc,
+                    )
+                    break
                 _maybe_metric_incr(
                     "broker_retry_total",
                     {"broker": self._inner.name, "op": op,
                      "attempt": str(attempt + 1)},
                 )
-                if attempt >= self._max_retries:
+                if attempt + 1 >= max_attempts:
                     break
                 delay = min(self._base_delay * (2 ** attempt), self._max_delay)
                 logger.debug(
