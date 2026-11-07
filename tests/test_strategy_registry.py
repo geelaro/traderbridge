@@ -1,5 +1,7 @@
 """Tests for strategy/base.py:register — auto-registration decorator."""
 
+from inspect import signature
+
 import pytest
 
 from strategy import STRATEGY_MAP
@@ -29,6 +31,12 @@ class TestStrategyMap:
     def test_classes_carry_their_registered_name(self):
         for name, cls in STRATEGY_MAP.items():
             assert getattr(cls, "_strategy_name", None) == name
+
+    def test_check_exit_signatures_follow_base_contract(self):
+        for name, cls in STRATEGY_MAP.items():
+            parameters = signature(cls.check_exit).parameters
+            assert "lowest_since_entry" in parameters, name
+            assert "position" in parameters, name
 
 
 class TestRegisterDecorator:

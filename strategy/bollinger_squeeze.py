@@ -109,6 +109,7 @@ class BollingerSqueeze(ChandelierTrailingExit, BaseStrategy):
         i: int,
         entry_price: float,
         highest_since_entry: float,
+        lowest_since_entry: Optional[float] = None,
         position: Optional[Dict] = None,
     ) -> Tuple[bool, str]:
         exit_flag, reason = self._chandelier_exit(df, i, highest_since_entry)

@@ -5,7 +5,7 @@ covered here (see module docstring: "不需要 Streamlit").
 """
 
 import json
-from datetime import date, timedelta
+from datetime import date
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -135,7 +135,7 @@ class TestRejectedSignals:
 
 
 # ===================================================================
-# _risk_delta — snapshot round-trip via risk_state key/value store
+# _risk_delta — snapshot round-trip via the analysis snapshot store
 # ===================================================================
 
 
@@ -206,30 +206,29 @@ class TestRiskDelta:
         assert snapshot is not None
         assert delta is None
 
-    def test_writes_snapshot_for_diffing_tomorrow(self, temp_cache, price_provider, two_symbol_config):
+    def test_writes_snapshot_without_polluting_live_risk_state(self, temp_cache, price_provider, two_symbol_config):
         target = date(2023, 10, 2)
         _risk_delta(two_symbol_config, target, price_provider, temp_cache, errors=[])
 
-        raw = temp_cache.load_risk_state(f"risk_snapshot:{target.isoformat()}")
-        assert raw is not None
-        stored = json.loads(raw)
+        stored = temp_cache.load_risk_snapshot(target.isoformat())
+        assert stored is not None
         assert "var_pct" in stored
         assert "hhi" in stored
+        assert temp_cache.load_risk_state(f"risk_snapshot:{target.isoformat()}") is None
 
-    def test_delta_computed_against_yesterday(self, temp_cache, price_provider, two_symbol_config):
-        yesterday = date(2023, 10, 1)
+    def test_delta_uses_latest_prior_snapshot(self, temp_cache, price_provider, two_symbol_config):
+        friday = date(2023, 9, 29)
         today = date(2023, 10, 2)
 
-        # Seed yesterday's snapshot directly (round-trip: write via the
-        # same key format _risk_delta reads, independent of its own write).
-        temp_cache.save_risk_state(
-            f"risk_snapshot:{yesterday.isoformat()}",
-            json.dumps({"var_pct": 1.0, "hhi": 5000.0, "sector_hhi": 6000.0, "effective_n": 2.0}),
+        temp_cache.save_risk_snapshot(
+            friday.isoformat(),
+            {"var_pct": 1.0, "hhi": 5000.0, "sector_hhi": 6000.0, "effective_n": 2.0},
         )
 
         snapshot, delta = _risk_delta(two_symbol_config, today, price_provider, temp_cache, errors=[])
         assert snapshot is not None
         assert delta is not None
+        assert delta["comparison_date"] == friday.isoformat()
         assert delta["hhi"] == pytest.approx(snapshot["hhi"] - 5000.0)
         assert delta["var_pct"] == pytest.approx(snapshot["var_pct"] - 1.0)
 

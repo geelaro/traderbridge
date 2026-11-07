@@ -2,7 +2,7 @@
 
 Aggregates four existing analyses into a single verdict: risk light +
 regime, today's signals, gate-rejected signals, and portfolio risk vs
-yesterday. ``build_decision_summary`` is pure compute (no Streamlit
+the latest earlier snapshot. ``build_decision_summary`` is pure compute (no Streamlit
 calls) so it can be unit-tested without a UI harness; ``render_decision_
 summary`` only renders an already-built summary dict.
 
@@ -16,27 +16,22 @@ evaluated: the dashboard has no live order sizing or orphan-position
 context to feed them, and faking one would be misleading rather than
 useful.
 
-``trading_paused``/``pause_reason`` are read from ``risk_state`` best-
-effort. Nothing currently writes those keys (only an in-memory
-``RiskController`` attribute set during a live session), so today this
-always reads back empty — expected while no daemon runs (see
-ROADMAP.md P2-1 / 阶段八). Reading it anyway means this starts working
-for free the day a writer exists.
+``trading_paused``/``pause_reason`` are read from the live operational
+snapshot, with the individual ``risk_state`` keys as a compatibility
+fallback when no current-day snapshot exists.
 
-v1 scope — risk delta vs yesterday
-------------------------------------
-No historical VaR/HHI persistence existed before this feature. Rather
-than add a new table (would need a schema migration + violate the
-"only live/scripts write new trading tables" layering convention for
-no real benefit — see AGENTS.md), this snapshots today's portfolio risk
-into the existing ``risk_state`` key/value store under
-``risk_snapshot:<date>`` and diffs against yesterday's key if present.
+v1 scope — risk delta vs the latest earlier snapshot
+-----------------------------------------------------
+Portfolio risk history is stored through a dedicated cache API in
+``portfolio_risk_snapshots``. It stays separate from ``risk_state``,
+which is reserved for live operational guardrails. Deltas use the latest
+earlier snapshot, so weekends and days without a dashboard visit do not
+break the comparison.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import timedelta
 
 import pandas as pd
 import streamlit as st
@@ -206,20 +201,19 @@ def _risk_delta(config, target_date, provider, cache, errors):
         cmp = compare_portfolios(prices, weights, weights, sector_map=DEFAULT_SECTORS)
         snapshot = cmp["before"]
 
-        today_key = f"risk_snapshot:{pd.Timestamp(target_date).date().isoformat()}"
-        cache.save_risk_state(today_key, json.dumps(snapshot))
-
-        yesterday = pd.Timestamp(target_date).date() - timedelta(days=1)
-        y_raw = cache.load_risk_state(f"risk_snapshot:{yesterday.isoformat()}")
-        if not y_raw:
+        as_of = pd.Timestamp(target_date).date().isoformat()
+        cache.save_risk_snapshot(as_of, snapshot)
+        previous = cache.load_previous_risk_snapshot(as_of)
+        if previous is None:
             return snapshot, None
 
-        y_snapshot = json.loads(y_raw)
+        comparison_date, previous_snapshot = previous
         delta = {
-            k: snapshot.get(k, 0.0) - y_snapshot.get(k, 0.0)
+            k: snapshot.get(k, 0.0) - previous_snapshot.get(k, 0.0)
             for k in ("var_pct", "hhi", "sector_hhi", "effective_n")
             if k in snapshot
         }
+        delta["comparison_date"] = comparison_date
         return snapshot, delta
     except Exception as exc:
         logger.warning("decision_summary: 风险快照计算失败: %s", exc)
@@ -335,11 +329,12 @@ def render_decision_summary(summary: dict) -> None:
     with col3:
         delta = summary["risk_delta"]
         if delta is None:
-            st.metric("组合风险 Δ (较昨日)", "—")
-            delta_caption = "无昨日快照数据"
+            st.metric("组合风险 Δ (较前次快照)", "—")
+            delta_caption = "暂无较早快照数据"
         else:
             var_d = delta.get("var_pct", 0.0)
-            st.metric("组合风险 Δ (较昨日)", f"VaR {var_d:+.2f}pp")
+            comparison_date = delta.get("comparison_date", "前次快照")
+            st.metric(f"组合风险 Δ (较 {comparison_date})", f"VaR {var_d:+.2f}pp")
             delta_caption = None
         with st.expander("风险快照明细"):
             snap = summary["risk_snapshot"]
@@ -350,7 +345,8 @@ def render_decision_summary(summary: dict) -> None:
                 st.write(f"- 有效N: {snap.get('effective_n', 0):.2f}")
                 if delta is not None:
                     st.write(
-                        f"- 较昨日: HHI {delta.get('hhi', 0):+.0f} / "
+                        f"- 较 {delta.get('comparison_date', '前次快照')}: "
+                        f"HHI {delta.get('hhi', 0):+.0f} / "
                         f"行业HHI {delta.get('sector_hhi', 0):+.0f} / "
                         f"有效N {delta.get('effective_n', 0):+.2f}"
                     )

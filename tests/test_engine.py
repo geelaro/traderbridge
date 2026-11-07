@@ -159,7 +159,10 @@ def test_engine_executes_entry_on_next_open():
         def entry_signal(self, df, i):
             return int(df["Signal"].iloc[i]) == 1
 
-        def check_exit(self, df, i, entry_price, highest_since_entry, position=None):
+        def check_exit(
+            self, df, i, entry_price, highest_since_entry,
+            lowest_since_entry=None, position=None,
+        ):
             return False, ""
 
         def position_size(self, capital, price, atr):

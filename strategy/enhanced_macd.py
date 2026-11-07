@@ -124,6 +124,7 @@ class EnhancedMACDStrategy(BaseStrategy):
         i: int,
         entry_price: float,
         highest_since_entry: float,
+        lowest_since_entry: Optional[float] = None,
         position: Optional[Dict] = None,
     ) -> Tuple[bool, str]:
         price = float(df["Close"].iloc[i])

@@ -488,19 +488,12 @@ class PortfolioBacktest:
         """Check exit signal for a held LONG position."""
         if price > st["highest"]:
             st["highest"] = price
-        try:
-            exit_now, reason = st["strategy"].check_exit(
-                df_sig, idx_pos,
-                entry_price=st["entry_price"],
-                highest_since_entry=st["highest"],
-                position={"date": st["entry_date"], "direction": "LONG"},
-            )
-        except TypeError:
-            exit_now, reason = st["strategy"].check_exit(
-                df_sig, idx_pos,
-                entry_price=st["entry_price"],
-                highest_since_entry=st["highest"],
-            )
+        exit_now, reason = st["strategy"].check_exit(
+            df_sig, idx_pos,
+            entry_price=st["entry_price"],
+            highest_since_entry=st["highest"],
+            position={"date": st["entry_date"], "direction": "LONG"},
+        )
         if exit_now:
             st["pending_order"] = self.execution_model.make_plan(
                 symbol=st["leg"].symbol,
@@ -517,21 +510,13 @@ class PortfolioBacktest:
         """
         if price < st["lowest"]:
             st["lowest"] = price
-        try:
-            exit_now, reason = st["strategy"].check_exit(
-                df_sig, idx_pos,
-                entry_price=st["entry_price"],
-                highest_since_entry=st.get("highest", 0),
-                lowest_since_entry=st["lowest"],
-                position={"date": st["entry_date"], "direction": "SHORT"},
-            )
-        except TypeError:
-            exit_now, reason = st["strategy"].check_exit(
-                df_sig, idx_pos,
-                entry_price=st["entry_price"],
-                highest_since_entry=st.get("highest", 0),
-                position={"date": st["entry_date"], "direction": "SHORT"},
-            )
+        exit_now, reason = st["strategy"].check_exit(
+            df_sig, idx_pos,
+            entry_price=st["entry_price"],
+            highest_since_entry=st.get("highest", 0),
+            lowest_since_entry=st["lowest"],
+            position={"date": st["entry_date"], "direction": "SHORT"},
+        )
         if exit_now:
             st["pending_order"] = self.execution_model.make_plan(
                 symbol=st["leg"].symbol,

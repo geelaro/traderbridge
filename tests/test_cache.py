@@ -165,6 +165,36 @@ class TestRiskState:
         assert temp_cache.load_risk_state("count") == "3"
 
 
+class TestPortfolioRiskSnapshots:
+    def test_upsert_and_load_previous(self, temp_cache):
+        temp_cache.save_risk_snapshot("2026-11-05", {"var_pct": 1.0})
+        temp_cache.save_risk_snapshot("2026-11-06", {"var_pct": 2.0})
+        temp_cache.save_risk_snapshot("2026-11-06", {"var_pct": 3.0})
+
+        assert temp_cache.load_risk_snapshot("2026-11-06") == {"var_pct": 3.0}
+        assert temp_cache.load_previous_risk_snapshot("2026-11-07") == (
+            "2026-11-06", {"var_pct": 3.0},
+        )
+        assert temp_cache.load_previous_risk_snapshot("2026-11-06") == (
+            "2026-11-05", {"var_pct": 1.0},
+        )
+
+    def test_ignores_malformed_previous_snapshot(self, temp_cache):
+        temp_cache.init_schema()
+        temp_cache.conn.execute(
+            "INSERT INTO portfolio_risk_snapshots (as_of, snapshot) VALUES (?, ?)",
+            ["2026-11-06", "not-json"],
+        )
+        temp_cache.conn.execute(
+            "INSERT INTO portfolio_risk_snapshots (as_of, snapshot) VALUES (?, ?)",
+            ["2026-11-05", '{"var_pct": 1.0}'],
+        )
+
+        assert temp_cache.load_previous_risk_snapshot("2026-11-07") == (
+            "2026-11-05", {"var_pct": 1.0},
+        )
+
+
 class TestAlertHistory:
     def test_record_and_load_single(self, temp_cache):
         temp_cache.record_alert(

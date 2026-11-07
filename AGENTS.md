@@ -9,7 +9,7 @@
 ## Verify
 
 ```bash
-pipenv run pytest -q                            # full suite (1043 tests, ~40s)
+pipenv run pytest -q                            # full suite; use pytest output for current count
 pipenv run pytest tests/test_golden.py -v        # CI gate only
 pipenv run pytest tests/test_strategy.py -v      # single file
 pipenv run pytest tests/test_strategy.py::TestWeeklyMACDKDJ -v  # single class
@@ -40,7 +40,7 @@ Flat single-package layout — everything is at the top level. No `src/` layout,
 | `dashboard/` | 3139 | Streamlit UI — **4 top-level tabs** (研究/绩效/风控/设置) with nested sub-tabs, pure render |
 | `utils/` | 1787 | Cross-cutting — notify (Feishu) / sizing / risk / market_state / signal_gate / logging / sectors |
 | `scripts/` | 364 | Cron entry — `weekly_risk_report.py` etc. |
-| `tests/` | **11890** | **1043 tests, all offline.** 75.9% coverage on runtime code |
+| `tests/` | **65 files** | **1367 passed, 2 skipped**; **78.7%** runtime coverage on 2026-11-07 |
 | `docs/` | — | `architecture.md` (full design doc) |
 
 Entry points: `live_trader.py`, `daily.py`, `dashboard.py`, `scripts/weekly_risk_report.py`. None are importable as libraries — they're scripts.
@@ -89,7 +89,7 @@ Access config: `from config import config` (singleton), then `config.risk.max_po
 - SQLite, WAL mode. Production DB: `trading_data.db` (gitignored).
 - Test DB: `conftest.py` sets `TRADERBRIDGE_DB` env var to a temp file before any import to isolate from production.
 - `data/cache.py` — `CacheManager` reads `TRADERBRIDGE_DB` env var first, falls back to legacy `MYTRADER_DB`, then `trading_data.db`.
-- DB tables: `ohlcv_daily`, `signals`, `order_log`, `slippage_log`, `ops_log`, `entry_prices`, `trade_pnl`, `risk_state`.
+- DB tables include `ohlcv_daily`, `signal_history`, `order_log`, `slippage_log`, `ops_log`, `entry_prices`, `trade_pnl`, `risk_state`, and `portfolio_risk_snapshots`.
 
 ## Undo / rollback workflow
 
@@ -237,8 +237,7 @@ dashboard   ← Streamlit UI; deps: analysis, engine, data, broker, live, utils
 scripts     ← cron entry; deps: most modules
 ```
 
-No cycles.  Currently verified manually (see [Layer-import enforcement](#layer-import-enforcement) below);
-CI gate via import-linter is planned but not yet wired.
+No cycles.  `tests/test_layer_boundaries.py` enforces key import and order-submission boundaries with AST checks, and CI runs the full `tests/` directory.  It is not a complete import-graph cycle detector.
 
 ### `analysis/` is pure compute
 
@@ -262,16 +261,19 @@ compatibility with the 7 other call sites that hadn't been migrated.
 | `decision_history` | `live/decision_logger` (via `live_trader.py` + KillSwitch) | dashboard `decision_review` |
 | `alert_history` | `live/risk_alerts`, `live/kill_switch` | dashboard `alert_history` |
 | `risk_state` | `live/risk_controller`, `live/kill_switch` | dashboard, daemon next tick |
+| `portfolio_risk_snapshots` | `dashboard/decision_summary` via the cache API | dashboard |
 | `entry_prices` | `live/risk_controller` | engine, analysis |
 | `ops_log` | utility code across `live/`, `broker/` | dashboard `ops` tab |
 
 `dashboard/`, `analysis/`, `scripts/` are **read-only** with respect to
-all of the above, **with one principled exception** — see Kill Switch.
+the trading-state tables above. The dashboard may persist derived portfolio
+risk snapshots in `portfolio_risk_snapshots` through the dedicated cache API;
+this table is analytical history and is not read by the trading daemon.
 
-If you want to write a new table from `dashboard/` or `analysis/`,
-reconsider.  The correct path is: dashboard writes a *request flag* to
-`risk_state` → daemon next tick reads the flag → daemon performs the
-action → daemon writes the table.
+Do not generalise analytical snapshot persistence to trading-state writes.
+For a new trading action, dashboard writes a *request flag* to `risk_state`
+→ daemon next tick reads the flag → daemon performs the action → daemon writes
+the trading-state table. `analysis/` remains pure compute and never writes.
 
 ### Sanctioned exception: Kill Switch is dashboard→broker direct
 

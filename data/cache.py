@@ -10,6 +10,7 @@ Classes
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import threading
@@ -246,6 +247,13 @@ class _CacheBase:
                     PRIMARY KEY (source, date)
                 )""",
                 "CREATE INDEX IF NOT EXISTS idx_source_health_date ON source_health(date)",
+            ]),
+            (5, [
+                """CREATE TABLE IF NOT EXISTS portfolio_risk_snapshots (
+                    as_of      TEXT PRIMARY KEY,
+                    snapshot   TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+                )""",
             ]),
         ]
 
@@ -871,13 +879,63 @@ class OpsLogger(_CacheBase):
             self._commit()
 
 
+class AnalysisSnapshotStore(_CacheBase):
+    """Persist derived analysis snapshots separately from live risk state."""
+
+    def save_risk_snapshot(self, as_of: str, snapshot: dict):
+        with self._lock:
+            self.init_schema()
+            self.conn.execute(
+                """INSERT INTO portfolio_risk_snapshots (as_of, snapshot)
+                   VALUES (?, ?)
+                   ON CONFLICT(as_of) DO UPDATE SET
+                       snapshot = excluded.snapshot,
+                       created_at = datetime('now','localtime')""",
+                [as_of, json.dumps(snapshot, ensure_ascii=False)],
+            )
+            self._commit()
+
+    def load_risk_snapshot(self, as_of: str) -> Optional[dict]:
+        with self._lock:
+            self.init_schema()
+            row = self.conn.execute(
+                "SELECT snapshot FROM portfolio_risk_snapshots WHERE as_of = ?",
+                [as_of],
+            ).fetchone()
+        if not row:
+            return None
+        try:
+            snapshot = json.loads(row[0])
+        except (TypeError, ValueError):
+            return None
+        return snapshot if isinstance(snapshot, dict) else None
+
+    def load_previous_risk_snapshot(self, as_of: str) -> Optional[Tuple[str, dict]]:
+        """Return the latest valid snapshot strictly before *as_of*."""
+        with self._lock:
+            self.init_schema()
+            rows = self.conn.execute(
+                """SELECT as_of, snapshot FROM portfolio_risk_snapshots
+                   WHERE as_of < ? ORDER BY as_of DESC""",
+                [as_of],
+            ).fetchall()
+        for snapshot_date, raw_snapshot in rows:
+            try:
+                snapshot = json.loads(raw_snapshot)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(snapshot, dict):
+                return snapshot_date, snapshot
+        return None
+
+
 # ======================================================================
 # CacheManager — backward-compat facade
 # ======================================================================
 
 
-class CacheManager(OhlcvCache, StateStore, OpsLogger):
-    """Full combined cache — all three specialized stores + signal history.
+class CacheManager(OhlcvCache, StateStore, AnalysisSnapshotStore, OpsLogger):
+    """Full combined cache — specialized stores + signal history.
 
     This is the backward-compatible class. New code can reach for the
     specialised classes directly if only a subset is needed.
