@@ -40,7 +40,7 @@ Flat single-package layout — everything is at the top level. No `src/` layout,
 | `dashboard/` | 3139 | Streamlit UI — **4 top-level tabs** (研究/绩效/风控/设置) with nested sub-tabs, pure render |
 | `utils/` | 1787 | Cross-cutting — notify (Feishu) / sizing / risk / market_state / signal_gate / logging / sectors |
 | `scripts/` | 364 | Cron entry — `weekly_risk_report.py` etc. |
-| `tests/` | **65 files** | **1368 passed, 2 skipped**; **78.6%** runtime coverage on 2026-11-07 |
+| `tests/` | **65 files** | **1371 passed, 2 skipped**; **78.7%** runtime coverage on 2026-11-07 |
 | `docs/` | — | `architecture.md` (full design doc) |
 
 Entry points: `live_trader.py`, `daily.py`, `dashboard.py`, `scripts/weekly_risk_report.py`. None are importable as libraries — they're scripts.
@@ -89,7 +89,7 @@ Access config: `from config import config` (singleton), then `config.risk.max_po
 - SQLite, WAL mode. Production DB: `trading_data.db` (gitignored).
 - Test DB: `conftest.py` sets `TRADERBRIDGE_DB` env var to a temp file before any import to isolate from production.
 - `data/cache.py` — `CacheManager` reads `TRADERBRIDGE_DB` env var first, falls back to legacy `MYTRADER_DB`, then `trading_data.db`.
-- DB tables include `ohlcv_daily`, `signal_history`, `order_log`, `slippage_log`, `ops_log`, `entry_prices`, `trade_pnl`, `risk_state`, and `portfolio_risk_snapshots`.
+- DB tables include `ohlcv_daily`, `signal_history`, `order_log`, `slippage_log`, `ops_log`, `entry_prices`, `trade_pnl`, `risk_state`, `portfolio_risk_snapshots`, and `app_metadata`.
 
 ## Undo / rollback workflow
 

@@ -107,6 +107,8 @@ def splits_file():
 class TestCheckSplitsChanged:
     def test_first_check_is_silent_baseline(self, temp_cache, splits_file):
         assert check_splits_changed(temp_cache, splits_file) is None
+        assert temp_cache.load_metadata("splits_hash") is not None
+        assert temp_cache.load_risk_state("splits_hash") is None
 
     def test_unchanged_stays_silent(self, temp_cache, splits_file):
         check_splits_changed(temp_cache, splits_file)

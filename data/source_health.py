@@ -1,8 +1,8 @@
 """Data-source health tracking and splits.json change detection.
 
 ROADMAP.md 阶段八 Ops-1 的落地工具. All persistence goes through
-``CacheManager``/``StateStore`` (``source_health`` table +
-``risk_state`` key/value) — this module holds the business logic
+``CacheManager`` (``source_health`` table + ``app_metadata`` key/value) —
+this module holds the business logic
 (cooldown math, hash comparison, report shaping), not raw SQL.
 
 Why this replaces ``DataProvider._failed_sources``
@@ -81,11 +81,11 @@ def check_splits_changed(cache, splits_path: str = "data/splits.json") -> Option
         return None
     current_hash = hashlib.sha256(content).hexdigest()
 
-    stored_hash = cache.load_risk_state(_SPLITS_HASH_KEY)
+    stored_hash = cache.load_metadata(_SPLITS_HASH_KEY)
     if stored_hash == current_hash:
         return None
 
-    cache.save_risk_state(_SPLITS_HASH_KEY, current_hash)
+    cache.save_metadata(_SPLITS_HASH_KEY, current_hash)
     if stored_hash is None:
         return None  # first time ever checking — nothing to compare against, not a "change"
 

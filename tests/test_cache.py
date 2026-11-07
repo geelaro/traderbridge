@@ -195,6 +195,15 @@ class TestPortfolioRiskSnapshots:
         )
 
 
+class TestAppMetadata:
+    def test_save_and_overwrite(self, temp_cache):
+        temp_cache.save_metadata("splits_hash", "old")
+        temp_cache.save_metadata("splits_hash", "new")
+
+        assert temp_cache.load_metadata("splits_hash") == "new"
+        assert temp_cache.load_risk_state("splits_hash") is None
+
+
 class TestAlertHistory:
     def test_record_and_load_single(self, temp_cache):
         temp_cache.record_alert(

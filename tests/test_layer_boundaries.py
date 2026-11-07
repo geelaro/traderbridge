@@ -148,6 +148,27 @@ class TestLowLayersDoNotImportLiveOrBroker:
         )
 
 
+class TestOperationalRiskStateWrites:
+    """risk_state is reserved for live operational guardrails."""
+
+    def test_writes_are_confined_to_live_layer(self):
+        violations = []
+        write_methods = {"save_risk_state", "save_risk_state_many"}
+        for path in _iter_all_py_files():
+            rel = path.relative_to(ROOT).as_posix()
+            if rel.startswith("live/"):
+                continue
+            tree = _parse(path)
+            for node in _iter_code_nodes(tree):
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in write_methods
+                ):
+                    violations.append(f"{rel}:{node.lineno}")
+        assert not violations, f"risk_state writes must stay in live/: {violations}"
+
+
 class TestEngineOnlyImportsBrokerValueTypes:
     """engine/ may reference broker VALUE TYPES (Order/OrderSide/OrderStatus
     /OrderType — plain dataclasses/enums shared as vocabulary) but never a

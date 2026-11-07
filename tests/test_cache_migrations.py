@@ -87,13 +87,15 @@ class TestFreshDatabase:
     def test_reaches_latest_schema_version(self, db_path):
         cache = CacheManager(db_path=db_path)
         cache.init_schema()
-        assert _schema_version(cache.conn) == 5
+        assert _schema_version(cache.conn) == 6
         cache.close()
 
     def test_all_migrated_tables_exist(self, db_path):
         cache = CacheManager(db_path=db_path)
         cache.init_schema()
-        for table in ("decision_history", "source_health", "portfolio_risk_snapshots"):
+        for table in (
+            "decision_history", "source_health", "portfolio_risk_snapshots", "app_metadata",
+        ):
             assert _table_exists(cache.conn, table), f"{table} missing after fresh init"
         for col in ("source", "level"):
             assert _column_exists(cache.conn, "ops_log", col)
@@ -105,7 +107,7 @@ class TestFreshDatabase:
         v1 = _schema_version(cache.conn)
         cache.init_schema()  # second call must not error or double-apply
         v2 = _schema_version(cache.conn)
-        assert v1 == v2 == 5
+        assert v1 == v2 == 6
         cache.close()
 
 
@@ -133,10 +135,11 @@ class TestUpgradeFromPreMigrationSchema:
         cache = CacheManager(db_path=db_path)
         cache.init_schema()
 
-        assert _schema_version(cache.conn) == 5
+        assert _schema_version(cache.conn) == 6
         assert _table_exists(cache.conn, "decision_history")
         assert _table_exists(cache.conn, "source_health")
         assert _table_exists(cache.conn, "portfolio_risk_snapshots")
+        assert _table_exists(cache.conn, "app_metadata")
         assert _column_exists(cache.conn, "ops_log", "source")
         assert _column_exists(cache.conn, "ops_log", "level")
         cache.close()
@@ -164,6 +167,25 @@ class TestUpgradeFromPreMigrationSchema:
         assert any(r["source"] == "tencent" for r in report)
         cache.save_risk_snapshot("2025-01-02", {"var_pct": 1.0})
         assert cache.load_risk_snapshot("2025-01-02") == {"var_pct": 1.0}
+        cache.save_metadata("splits_hash", "legacy")
+        assert cache.load_metadata("splits_hash") == "legacy"
+        cache.close()
+
+    def test_migrates_splits_hash_out_of_risk_state(self, db_path):
+        self._create_pre_migration_db(db_path)
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT INTO risk_state (key, value) VALUES (?, ?)",
+            ("splits_hash", "known-hash"),
+        )
+        conn.commit()
+        conn.close()
+
+        cache = CacheManager(db_path=db_path)
+        cache.init_schema()
+
+        assert cache.load_metadata("splits_hash") == "known-hash"
+        assert cache.load_risk_state("splits_hash") is None
         cache.close()
 
 
@@ -194,7 +216,7 @@ class TestUpgradeFromTruePreV1Schema:
         cache = CacheManager(db_path=db_path)
         cache.init_schema()
 
-        assert _schema_version(cache.conn) == 5
+        assert _schema_version(cache.conn) == 6
         assert _column_exists(cache.conn, "ohlcv_daily", "source")
         assert _column_exists(cache.conn, "ops_log", "source")
         assert _column_exists(cache.conn, "ops_log", "level")

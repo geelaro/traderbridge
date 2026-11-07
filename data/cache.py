@@ -255,6 +255,16 @@ class _CacheBase:
                     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
                 )""",
             ]),
+            (6, [
+                """CREATE TABLE IF NOT EXISTS app_metadata (
+                    key        TEXT PRIMARY KEY,
+                    value      TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+                )""",
+                """INSERT OR IGNORE INTO app_metadata (key, value)
+                   SELECT 'splits_hash', value FROM risk_state WHERE key = 'splits_hash'""",
+                "DELETE FROM risk_state WHERE key = 'splits_hash'",
+            ]),
         ]
 
         for version, statements in migrations:
@@ -929,12 +939,38 @@ class AnalysisSnapshotStore(_CacheBase):
         return None
 
 
+class MetadataStore(_CacheBase):
+    """Application metadata that is not live operational risk state."""
+
+    def save_metadata(self, key: str, value: str):
+        with self._lock:
+            self.init_schema()
+            self.conn.execute(
+                """INSERT INTO app_metadata (key, value) VALUES (?, ?)
+                   ON CONFLICT(key) DO UPDATE SET
+                       value = excluded.value,
+                       updated_at = datetime('now','localtime')""",
+                [key, value],
+            )
+            self._commit()
+
+    def load_metadata(self, key: str) -> Optional[str]:
+        with self._lock:
+            self.init_schema()
+            row = self.conn.execute(
+                "SELECT value FROM app_metadata WHERE key = ?", [key]
+            ).fetchone()
+        return row[0] if row else None
+
+
 # ======================================================================
 # CacheManager — backward-compat facade
 # ======================================================================
 
 
-class CacheManager(OhlcvCache, StateStore, AnalysisSnapshotStore, OpsLogger):
+class CacheManager(
+    OhlcvCache, StateStore, AnalysisSnapshotStore, MetadataStore, OpsLogger,
+):
     """Full combined cache — specialized stores + signal history.
 
     This is the backward-compatible class. New code can reach for the

@@ -17,8 +17,8 @@
 |------|------|
 | 总 commit | 170+(从 2023 mytrader 时代起算) |
 | 业务代码 | **~19,000 行** Python(不含测试) |
-| 测试代码 | **65 个测试文件 / 1368 passed / 2 skipped**(2026-11-07) |
-| 覆盖率 | **78.6%**(2026-11-07;排除 tests/dashboard/scripts) |
+| 测试代码 | **65 个测试文件 / 1371 passed / 2 skipped**(2026-11-07) |
+| 覆盖率 | **78.7%**(2026-11-07;排除 tests/dashboard/scripts) |
 | Dashboard tab | **11 个** |
 | 数据源 | 6 个(sina_us / tencent / cboe / yahoo_chart / yahoo_realtime / futu) |
 | 策略库 | 13 个(9 个 active + 3 个弃用 + 1 个 ensemble) |
@@ -94,6 +94,7 @@
                 │   DataProvider              │
                 │   失败链 sina→tencent→yahoo │
                 │   _check_cross_source_drift │
+                │   持久化 source cooldown   │
                 └───────────────┬─────────────┘
                                 │
                   ┌─────────────▼────────────┐
@@ -285,7 +286,7 @@ Python 默认会用 ERROR 级别 log,推送大量噪音卡片。
 | broker 接口缺 `list_open_orders` | 中 | Kill Switch 现在只清持仓,不取消挂单 |
 | `_yahoo_session` 与 `_realtime_session` 两套 | 低 | 必要的隔离,但模块边界稍碎 |
 | trade_pnl 表无 strategy 字段 | 低 | Brinson 等无法按策略再归因 |
-| 数据源各 API 错误处理不一致 | 中 | 缺一致的 retry / cooldown 中间层 |
+| 数据源各 API 超时/解析策略不一致 | 中 | 已有跨源回退、持久化 15 分钟 source cooldown 和标的 retry window;缺统一 endpoint retry/backoff 策略 |
 | logs/ 文件没有 rotation | 低 | 长跑可能堆爆 |
 | dashboard/ 排除在覆盖率统计外 | 低 | 有少量 render smoke tests,但 UI 行为覆盖有限 |
 | `@st.cache_resource` 单例 cache/provider | 低 | multi-user 部署冲突,单用户 OK |
@@ -298,13 +299,16 @@ Python 默认会用 ERROR 级别 log,推送大量噪音卡片。
 变化量按最近一条更早的快照计算,因此周末或中间未打开仪表盘时仍可比较。
 这张表仅供分析界面读取,不作为交易状态或下单条件。
 
+`data/source_health.py` 将拆股文件指纹保存在 `app_metadata`,与交易风控键
+`risk_state` 分开;schema v6 会迁移已有的 `splits_hash` 值。
+
 ---
 
 ## 七、生产就绪评估
 
 | 维度 | 状态 | 评语 |
 |------|------|------|
-| 代码质量 | ✅ | 1368 passed / 2 skipped;78.6% 覆盖率(2026-11-07) |
+| 代码质量 | ✅ | 1371 passed / 2 skipped;78.7% 覆盖率(2026-11-07) |
 | 错误处理 | ✅ | 每个 section/source 独立 try/except,不级联崩溃 |
 | 数据完整性 | ✅ | 跨源校验 + 拆股统一 + drift warning |
 | 告警审计 | ✅ | alert_history + ops_log + JSON 结构化日志 |
