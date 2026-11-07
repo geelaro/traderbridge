@@ -6,6 +6,11 @@ moved to :mod:`utils.bootstrap`.  Entry-point scripts now call
 effects.  See ``utils/bootstrap.py`` for the rationale.
 """
 
+import json
+import os
+import stat
+import tempfile
+
 
 def load_toml(path: str) -> dict:
     """Load a TOML config file. Works on Python 3.10+."""
@@ -21,9 +26,6 @@ def load_toml(path: str) -> dict:
 def save_toml(path: str, data: dict):
     """Write a dict as TOML (hand-rolled, no external dependency)."""
     lines = []
-    # Sections that use [[array]] syntax
-    array_sections = {"watchlist"}
-
     for section, content in data.items():
         if isinstance(content, list):
             for item in content:
@@ -44,8 +46,27 @@ def save_toml(path: str, data: dict):
                     lines.append(f"{k} = {_toml_value(v)}")
         else:
             lines.append(f"{section} = {_toml_value(content)}")
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines).lstrip() + "\n")
+    content = "\n".join(lines).lstrip() + "\n"
+    target = os.path.abspath(os.fspath(path))
+    try:
+        existing_mode = stat.S_IMODE(os.stat(target).st_mode)
+    except FileNotFoundError:
+        existing_mode = None
+    fd, temp_path = tempfile.mkstemp(
+        prefix=f".{os.path.basename(target)}.", suffix=".tmp",
+        dir=os.path.dirname(target),
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        if existing_mode is not None:
+            os.chmod(temp_path, existing_mode)
+        os.replace(temp_path, target)
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
 
 
 def _toml_value(v) -> str:
@@ -56,7 +77,7 @@ def _toml_value(v) -> str:
             return str(int(v))
         return str(v)
     if isinstance(v, str):
-        return f'"{v}"'
+        return json.dumps(v, ensure_ascii=False)
     if isinstance(v, list):
         items = ", ".join(_toml_value(i) for i in v)
         return f"[{items}]"

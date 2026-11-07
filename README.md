@@ -14,7 +14,7 @@
 | 维度 | 数据 |
 |------|------|
 | 业务代码 | ~19,000 行 Python |
-| 测试 | **1043 用例 / 49 文件 / 75.9% 覆盖率** |
+| 测试 | **1373 passed / 2 skipped / 66 文件 / 79.0% 覆盖率** |
 | Dashboard tab | **11 个** |
 | 数据源 | 6 个(sina_us / tencent / cboe / yahoo_chart / yahoo_realtime / futu) |
 | 策略库 | 13 个(9 active + 3 弃用 + 1 ensemble) |
@@ -75,7 +75,7 @@
 |------|------|
 | 日志 | 结构化 JSON 日志,/health HTTP 端点,ops_log + alert_history 审计 |
 | Dashboard | Streamlit Web UI,11 个 tab(见下) |
-| CI | GitHub Actions + Codecov + badge,push/PR 自动跑 1043 测试 |
+| CI | GitHub Actions + Codecov + badge,push/PR 自动跑完整测试套件 |
 | Docker | docker-compose.yml 一键部署 traderbridge + futu-opend + HEALTHCHECK |
 
 ## Dashboard 11 个 Tab
@@ -214,7 +214,7 @@ traderbridge/
   scripts/           # 命令入口 (4 文件 / 364 行)
   └─ weekly_risk_report.py  #   cron 入口,周报推飞书
 
-  tests/             # 1043 测试 (49 文件 / 11890 行)
+  tests/             # 1373 passed, 2 skipped (66 文件 / 12670 行)
   docs/              # 架构文档
   └─ architecture.md
   reports/           # 自动生成的 CSV + PNG
@@ -236,7 +236,7 @@ traderbridge/
 # Python 3.10+
 pip install pipenv
 pipenv install --dev
-pipenv run pytest -q   # 1043 tests / 0 failures
+pipenv run pytest -q   # 1373 passed / 2 skipped
 ```
 
 **国内必须配置代理**(Yahoo / GitHub 直连不通)。在 `.env` 写:

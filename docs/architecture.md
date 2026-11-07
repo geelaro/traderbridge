@@ -17,8 +17,8 @@
 |------|------|
 | 总 commit | 170+(从 2023 mytrader 时代起算) |
 | 业务代码 | **~19,000 行** Python(不含测试) |
-| 测试代码 | **65 个测试文件 / 1371 passed / 2 skipped**(2026-11-07) |
-| 覆盖率 | **78.7%**(2026-11-07;排除 tests/dashboard/scripts) |
+| 测试代码 | **66 个测试文件 / 1373 passed / 2 skipped**(2026-11-07) |
+| 覆盖率 | **79.0%**(2026-11-07;排除 tests/dashboard/scripts) |
 | Dashboard tab | **11 个** |
 | 数据源 | 6 个(sina_us / tencent / cboe / yahoo_chart / yahoo_realtime / futu) |
 | 策略库 | 13 个(9 个 active + 3 个弃用 + 1 个 ensemble) |
@@ -308,7 +308,7 @@ Python 默认会用 ERROR 级别 log,推送大量噪音卡片。
 
 | 维度 | 状态 | 评语 |
 |------|------|------|
-| 代码质量 | ✅ | 1371 passed / 2 skipped;78.7% 覆盖率(2026-11-07) |
+| 代码质量 | ✅ | 1373 passed / 2 skipped;79.0% 覆盖率(2026-11-07) |
 | 错误处理 | ✅ | 每个 section/source 独立 try/except,不级联崩溃 |
 | 数据完整性 | ✅ | 跨源校验 + 拆股统一 + drift warning |
 | 告警审计 | ✅ | alert_history + ops_log + JSON 结构化日志 |
