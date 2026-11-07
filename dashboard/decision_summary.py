@@ -44,6 +44,7 @@ from utils import get_logger
 from utils.market_state import MarketStateClassifier
 from utils.sectors import DEFAULT_SECTORS
 from utils.signal_gate import SignalGate
+from dashboard.sentiment_display import sentiment_markup
 
 logger = get_logger("dashboard.decision_summary")
 
@@ -360,14 +361,15 @@ def render_decision_summary(summary: dict) -> None:
                 for s in summary["signals"]:
                     tag = "买入" if s["signal"] == 1 else "卖出"
                     sentiment = s.get("symbol_sentiment")
-                    sentiment_tag = (
-                        f" · {sentiment['label']} {sentiment['score']:.0f}/100"
-                        if sentiment else " · 情绪数据不足"
-                    )
-                    st.write(
+                    line = (
                         f"- {s['symbol']} {s['strategy']}: {tag} "
-                        f"@ {s.get('price', 0):.2f}{sentiment_tag}"
+                        f"@ {s.get('price', 0):.2f}"
                     )
+                    if sentiment:
+                        line += f" · {sentiment_markup(sentiment)}"
+                    else:
+                        line += " · 情绪数据不足"
+                    st.markdown(line, unsafe_allow_html=True)
             else:
                 st.caption("今日无信号")
 

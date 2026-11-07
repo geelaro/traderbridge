@@ -11,6 +11,7 @@ from strategy import SIGNAL_LABEL
 from analysis.risk_monitor import compute_risk_state, compute_symbol_sentiment, RiskLevel
 from data.realtime import get_realtime_vix, get_fear_greed
 from live.position_stops import compute_hypothetical_positions
+from dashboard.sentiment_display import sentiment_markup, sentiment_text, sentiment_cell_style
 
 logger = get_logger("dashboard.signals")
 
@@ -374,25 +375,20 @@ def render_signal_detail(config, target_date, provider, cache):
         bar_date_full = str(primary.get("bar_date", "") or "")
         bar_date_short = bar_date_full[5:10] if len(bar_date_full) >= 10 else "—"
         stock_sentiment = primary.get("symbol_sentiment")
-        sentiment_tag = (
-            f" · {stock_sentiment['label']} {stock_sentiment['score']:.0f}/100"
-            if stock_sentiment else " · 情绪数据不足"
-        )
-
         title = (
             f"{cfg['icon']} {sym}  {cfg['label']}  @ ${price:.2f} ({bar_date_short})  "
-            f"({primary['strategy']}){sentiment_tag}"
+            f"({primary['strategy']})"
         )
         with st.expander(title, expanded=False):
             if bar_date_full:
                 st.caption(f"📅 数据来自 **{bar_date_full}** 的日 K 收盘价")
             if stock_sentiment:
-                st.caption(
-                    f"个股情绪：{stock_sentiment['label']} "
-                    f"{stock_sentiment['score']:.1f}/100 · "
+                st.markdown(
+                    f"个股情绪：{sentiment_markup(stock_sentiment)} · "
                     f"RSI14 {stock_sentiment['rsi14']:.1f} · "
                     f"距 MA200 {stock_sentiment['vs_ma200_pct']:+.1f}% · "
-                    f"数据截至 {stock_sentiment['as_of']}"
+                    f"数据截至 {stock_sentiment['as_of']}",
+                    unsafe_allow_html=True,
                 )
             else:
                 st.caption("个股情绪：历史行情不足，暂不可判定")
@@ -544,8 +540,7 @@ def render_position_watch(config, target_date, provider):
         "标的": r["symbol"],
         "策略": r["strategy"],
         "个股情绪": (
-            f"{sentiments[r['symbol']]['label']} "
-            f"{sentiments[r['symbol']]['score']:.0f}/100 · "
+            f"{sentiment_text(sentiments[r['symbol']])} · "
             f"{sentiments[r['symbol']]['as_of']}"
             if sentiments.get(r["symbol"]) else "数据不足"
         ),
@@ -557,7 +552,11 @@ def render_position_watch(config, target_date, provider):
         "距止损%": f"{r['distance_pct']:.2f}%",
         "持仓天": r["days_held"],
     } for r in rows])
-    st.dataframe(df_display, use_container_width=True, hide_index=True)
+    st.dataframe(
+        df_display.style.map(sentiment_cell_style, subset=["个股情绪"]),
+        use_container_width=True,
+        hide_index=True,
+    )
 
     danger = [r for r in rows if r["distance_pct"] < 5]
     if danger:
