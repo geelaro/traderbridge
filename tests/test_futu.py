@@ -15,7 +15,7 @@ from broker.futu import (
 from broker.base import (
     Order, OrderSide, OrderStatus, OrderType, Account, Position,
 )
-from futu import TrdSide, OrderType as FutuOrderType, OrderStatus as FutuOrderStatus, TrdMarket
+from futu import TrdSide, OrderType as FutuOrderType, OrderStatus as FutuOrderStatus, TrdEnv, TrdMarket
 
 
 # ===================================================================
@@ -131,11 +131,31 @@ class TestFutuBrokerInterface:
                 side_effect=lambda symbol: object() if symbol == "AAPL" else None):
             assert broker.warmup(["AAPL", "HK.00700"]) is False
 
+    def test_resolves_simulated_account_id_per_market(self):
+        import pandas as pd
+
+        broker = FutuBroker()
+        us_ctx, hk_ctx = MagicMock(), MagicMock()
+        us_ctx.get_acc_list.return_value = (0, pd.DataFrame([{
+            "trd_env": TrdEnv.SIMULATE, "sim_acc_type": broker._sim_acc_type,
+            "acc_id": 101,
+        }]))
+        hk_ctx.get_acc_list.return_value = (0, pd.DataFrame([{
+            "trd_env": TrdEnv.SIMULATE, "sim_acc_type": broker._sim_acc_type,
+            "acc_id": 202,
+        }]))
+        with patch("broker.futu.OpenSecTradeContext", side_effect=[us_ctx, hk_ctx]):
+            assert broker._get_trade_ctx("AAPL") is us_ctx
+            assert broker._get_trade_ctx("HK.00700") is hk_ctx
+
+        assert broker._acc_ids == {TrdMarket.US: 101, TrdMarket.HK: 202}
+
     def test_get_account_api_failure_raises(self):
         broker = FutuBroker()
         ctx = MagicMock()
         ctx.accinfo_query.return_value = (-1, "account unavailable")
         broker._trade_ctxs[TrdMarket.US] = ctx
+        broker._acc_ids[TrdMarket.US] = 101
 
         with pytest.raises(ConnectionError, match="account snapshot unavailable"):
             broker.get_account()
@@ -149,6 +169,7 @@ class TestFutuBrokerInterface:
             "total_assets": 12500, "cash": 8000, "frozen_cash": 500,
         }]))
         broker._trade_ctxs[TrdMarket.US] = ctx
+        broker._acc_ids[TrdMarket.US] = 101
 
         account = broker.get_account()
 
@@ -163,6 +184,7 @@ class TestFutuBrokerInterface:
         ctx = MagicMock()
         ctx.position_list_query.return_value = (-1, "positions unavailable")
         broker._trade_ctxs[TrdMarket.US] = ctx
+        broker._acc_ids[TrdMarket.US] = 101
 
         with pytest.raises(ConnectionError, match="positions snapshot unavailable"):
             broker.get_positions()
@@ -179,6 +201,7 @@ class TestFutuBrokerInterface:
         hk_ctx.position_list_query.return_value = (-1, "market unavailable")
         broker._trade_ctxs[TrdMarket.US] = us_ctx
         broker._trade_ctxs[TrdMarket.HK] = hk_ctx
+        broker._acc_ids.update({TrdMarket.US: 101, TrdMarket.HK: 202})
 
         with pytest.raises(ConnectionError, match="positions snapshot unavailable"):
             broker.get_positions()
@@ -203,6 +226,45 @@ class TestFutuBrokerInterface:
             result = broker.submit_order(order)
         assert result.status == OrderStatus.REJECTED
         assert "error" in result.broker_data
+
+    def test_account_queries_use_market_specific_account_ids(self):
+        import pandas as pd
+
+        broker = FutuBroker()
+        us_ctx = MagicMock()
+        hk_ctx = MagicMock()
+        us_ctx.accinfo_query.return_value = (0, pd.DataFrame([{
+            "total_assets": 10000, "cash": 7000, "frozen_cash": 0,
+        }]))
+        hk_ctx.accinfo_query.return_value = (0, pd.DataFrame([{
+            "total_assets": 5000, "cash": 3000, "frozen_cash": 0,
+        }]))
+        broker._trade_ctxs.update({TrdMarket.US: us_ctx, TrdMarket.HK: hk_ctx})
+        broker._acc_ids.update({TrdMarket.US: 101, TrdMarket.HK: 202})
+
+        broker.get_account()
+
+        assert us_ctx.accinfo_query.call_args.kwargs["acc_id"] == 101
+        assert hk_ctx.accinfo_query.call_args.kwargs["acc_id"] == 202
+
+    def test_submit_order_uses_market_specific_account_id(self):
+        import pandas as pd
+
+        broker = FutuBroker()
+        hk_ctx = MagicMock()
+        hk_ctx.place_order.return_value = (0, pd.DataFrame([{
+            "order_id": "hk-order", "order_status": FutuOrderStatus.SUBMITTED,
+            "dealt_qty": 0, "dealt_avg_price": 0,
+        }]))
+        broker._acc_ids[TrdMarket.HK] = 202
+        order = Order(
+            symbol="HK.00700", side=OrderSide.BUY,
+            order_type=OrderType.MARKET, quantity=1,
+        )
+        with patch.object(broker, "_get_trade_ctx", return_value=hk_ctx):
+            broker.submit_order(order)
+
+        assert hk_ctx.place_order.call_args.kwargs["acc_id"] == 202
 
     def test_last_prices_dict(self):
         broker = FutuBroker()
