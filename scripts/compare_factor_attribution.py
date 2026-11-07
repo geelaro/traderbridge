@@ -4,7 +4,8 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import utils  # noqa: F401
+from utils.bootstrap import setup_runtime
+setup_runtime()
 
 from engine.portfolio import Leg, PortfolioBacktest
 from analysis.factor_returns import FactorReturns

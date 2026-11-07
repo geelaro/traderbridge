@@ -40,7 +40,7 @@ Flat single-package layout — everything is at the top level. No `src/` layout,
 | `dashboard/` | 3139 | Streamlit UI — **4 top-level tabs** (研究/绩效/风控/设置) with nested sub-tabs, pure render |
 | `utils/` | 1787 | Cross-cutting — notify (Feishu) / sizing / risk / market_state / signal_gate / logging / sectors |
 | `scripts/` | 364 | Cron entry — `weekly_risk_report.py` etc. |
-| `tests/` | **67 files** | **1374 passed, 2 skipped**; **79.0%** runtime coverage on 2026-11-07 |
+| `tests/` | **67 files** | **1388 passed, 2 skipped**; **79.0%** runtime coverage on 2026-11-07 |
 | `docs/` | — | `architecture.md` (full design doc) |
 
 Entry points: `live_trader.py`, `daily.py`, `dashboard.py`, `scripts/weekly_risk_report.py`. None are importable as libraries — they're scripts.
@@ -48,10 +48,11 @@ Entry points: `live_trader.py`, `daily.py`, `dashboard.py`, `scripts/weekly_risk
 ## Runtime bootstrap
 
 Entry points must call `setup_runtime()` from `utils.bootstrap` before any
-Matplotlib import. It sets the `Agg` backend, configures UTF-8 stdout on
-Windows, and loads the project-root `.env`. Importing `utils` alone does not
-run this setup. Current entry points (`dashboard.py`, `daily.py`,
-`live_trader.py`, and scripts that need it) call the bootstrap explicitly.
+Matplotlib or business-module import. It sets the `Agg` backend, configures
+UTF-8 stdout on Windows, and loads the project-root `.env`. Importing `utils`
+alone does not run this setup. Root entry points and `scripts/` tools call it
+explicitly; standalone `analysis/` and `engine/` commands call it only when
+run as scripts, keeping ordinary library imports free of bootstrap effects.
 
 ## Config system
 

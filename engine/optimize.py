@@ -14,6 +14,10 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Optional
 
+if __name__ == "__main__":
+    from utils.bootstrap import setup_runtime
+    setup_runtime()
+
 from utils.font import setup_chinese_font
 import matplotlib.pyplot as plt
 import numpy as np

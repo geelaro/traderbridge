@@ -16,7 +16,8 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import utils  # noqa: F401
+from utils.bootstrap import setup_runtime
+setup_runtime()
 
 import numpy as np
 import pandas as pd
