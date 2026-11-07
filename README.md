@@ -194,6 +194,7 @@ traderbridge/
   ├─ risk.py                #   RiskLimits 数据类
   ├─ metrics.py             #   回撤统计、敞口重构
   ├─ env.py                 #   TOML 读写 (load_toml/save_toml)
+  ├─ bootstrap.py           #   显式运行时初始化 (.env / Matplotlib / Windows UTF-8)
   └─ font.py                #   中文字体兼容
 
   dashboard/         # Streamlit UI (14 文件 / 3139 行)
@@ -223,7 +224,6 @@ traderbridge/
   live_trader.py     # 实盘信号执行 + 风控 + HTTP /health
   daily.py           # 每日回溯 + --optimize 滚动优化
   dashboard.py       # Streamlit 入口
-  config.py          # 统一运行时配置
   watchlist.toml     # 标的 + 策略 + 风控 + 告警阈值
   docker-compose.yml # 一键部署 (traderbridge + futu-opend)
   .coveragerc        # 覆盖率配置

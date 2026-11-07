@@ -45,22 +45,22 @@ Flat single-package layout — everything is at the top level. No `src/` layout,
 
 Entry points: `live_trader.py`, `daily.py`, `dashboard.py`, `scripts/weekly_risk_report.py`. None are importable as libraries — they're scripts.
 
-## Critical: import side-effects
+## Runtime bootstrap
 
-**`import utils` MUST be done before any `matplotlib` import.** The `utils/__init__.py` triggers `utils/env.py` on import, which:
-- Fixes Windows GBK encoding
-- Sets matplotlib backend to `"Agg"` (headless, required on servers/Docker)
-- Loads `.env` via dotenv
-
-If you import matplotlib or pyplot before `import utils`, the backend won't be `Agg` and charts will fail in headless environments.
+Entry points must call `setup_runtime()` from `utils.bootstrap` before any
+Matplotlib import. It sets the `Agg` backend, configures UTF-8 stdout on
+Windows, and loads the project-root `.env`. Importing `utils` alone does not
+run this setup. Current entry points (`dashboard.py`, `daily.py`,
+`live_trader.py`, and scripts that need it) call the bootstrap explicitly.
 
 ## Config system
 
-Load order: `DEFAULT_CONFIG` (hardcoded in `config.py`) → `config.yaml` (optional, at project root) → environment variables (`.env`).
-
-`watchlist.toml` is the canonical source for symbols, active strategies, monitor strategies, strategy params, risk params, and market state config. It's lazy-loaded via `config.watchlist_data` (calls `utils.env.load_toml`). Don't edit watchlist data in `config.py`.
-
-Access config: `from config import config` (singleton), then `config.risk.max_position_pct`, `config.feishu.webhook`, etc.
+`watchlist.toml` is the canonical runtime configuration for the watchlist,
+strategy parameters, scanner, market state, risk, alerts, and execution.
+Entry points load it with `utils.env.load_toml`; there is no `config.py`
+singleton or `config.yaml` merge layer in the current codebase. `.env` is
+loaded by `setup_runtime()` and supplies process environment variables where
+the code explicitly reads them.
 
 ## Strategy conventions
 
