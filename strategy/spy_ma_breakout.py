@@ -95,7 +95,9 @@ class SPYMABreakout(BaseStrategy):
 
     # -- indicators ---------------------------------------------------------
 
-    def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+    def calculate_indicators(
+        self, df: pd.DataFrame, df_weekly: pd.DataFrame = None,
+    ) -> pd.DataFrame:
         df = df.copy()
         p = self.params
 

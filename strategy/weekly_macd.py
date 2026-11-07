@@ -43,7 +43,9 @@ class WeeklyMACD(BaseStrategy):
 
     # ------------------------------------------------------------------
 
-    def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+    def calculate_indicators(
+        self, df: pd.DataFrame, df_weekly: pd.DataFrame = None,
+    ) -> pd.DataFrame:
         p = self.params
         weekly = resample_weekly(df)
         weekly = compute_macd(weekly, p.macd_fast, p.macd_slow, p.macd_signal)

@@ -96,7 +96,9 @@ class StrategyEnsemble(BaseStrategy):
 
     # -- indicators ---------------------------------------------------------
 
-    def calculate_indicators(self, df: pd.DataFrame, df_weekly=None) -> pd.DataFrame:
+    def calculate_indicators(
+        self, df: pd.DataFrame, df_weekly: pd.DataFrame = None,
+    ) -> pd.DataFrame:
         """Run each member and combine signals via weighted vote."""
         state = self._classifier.classify()
         weights = self._weights.get(state.regime, {"trend": 0.5, "mean_reversion": 0.5})
@@ -111,10 +113,7 @@ class StrategyEnsemble(BaseStrategy):
         member_regimes: List[str] = []
         member_dfs: List[pd.DataFrame] = []
         for strat, regime_label in self._members:
-            try:
-                df_sig = strat.calculate_indicators(df, df_weekly=df_weekly)
-            except TypeError:
-                df_sig = strat.calculate_indicators(df)
+            df_sig = strat.calculate_indicators(df, df_weekly=df_weekly)
             member_signals.append(df_sig["Signal"])
             member_regimes.append(regime_label)
             member_dfs.append(df_sig)

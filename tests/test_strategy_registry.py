@@ -38,6 +38,11 @@ class TestStrategyMap:
             assert "lowest_since_entry" in parameters, name
             assert "position" in parameters, name
 
+    def test_indicator_signatures_follow_base_contract(self):
+        for name, cls in STRATEGY_MAP.items():
+            parameters = signature(cls.calculate_indicators).parameters
+            assert "df_weekly" in parameters, name
+
 
 class TestRegisterDecorator:
     def test_duplicate_name_different_class_raises(self):

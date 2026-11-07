@@ -40,7 +40,7 @@ Flat single-package layout — everything is at the top level. No `src/` layout,
 | `dashboard/` | 3139 | Streamlit UI — **4 top-level tabs** (研究/绩效/风控/设置) with nested sub-tabs, pure render |
 | `utils/` | 1787 | Cross-cutting — notify (Feishu) / sizing / risk / market_state / signal_gate / logging / sectors |
 | `scripts/` | 364 | Cron entry — `weekly_risk_report.py` etc. |
-| `tests/` | **65 files** | **1367 passed, 2 skipped**; **78.7%** runtime coverage on 2026-11-07 |
+| `tests/` | **65 files** | **1368 passed, 2 skipped**; **78.6%** runtime coverage on 2026-11-07 |
 | `docs/` | — | `architecture.md` (full design doc) |
 
 Entry points: `live_trader.py`, `daily.py`, `dashboard.py`, `scripts/weekly_risk_report.py`. None are importable as libraries — they're scripts.
@@ -65,9 +65,9 @@ Access config: `from config import config` (singleton), then `config.risk.max_po
 ## Strategy conventions
 
 - All strategies extend `BaseStrategy` from `strategy/base.py`
-- Must implement `calculate_indicators(df) → df` — adds a **`Signal` column** with int values: `1` = buy, `-1` = sell, `0` = hold
+- Must implement `calculate_indicators(df, df_weekly=None) → df` — single-timeframe strategies may ignore `df_weekly`; adds a **`Signal` column** with int values: `1` = buy, `-1` = sell, `0` = hold
 - Must define `min_bars` property (minimum data needed before first signal)
-- Exit logic lives in the strategy (via `check_exit`), not in the engine
+- `check_exit` accepts `lowest_since_entry=None` and `position=None`; exit logic lives in the strategy, not in the engine
 - `StrategyParams` is a dataclass for parameter defaults
 
 ### Adding a new strategy requires 3 changes in 3 files:
