@@ -309,10 +309,12 @@ implementations** (`Broker`, `MockBroker`, `FutuBroker`, `RetryingBroker`
 engine and strategy may use them.  Implementations may only be touched
 by `live/`, `dashboard/` (KillSwitch only), `scripts/`, and tests.
 
-Until import-linter is wired into CI, these greps are the spot-checks:
+Executable AST checks in `tests/test_layer_boundaries.py` enforce these
+boundaries in CI; `.github/workflows/ci.yml` runs the full test suite.  The
+greps below remain useful as quick local spot-checks:
 
 ```bash
-# analysis/ MUST NOT import live/  (one known violation, slated for fix)
+# analysis/ MUST NOT import live/
 grep -rn "from live\|^import live\b" analysis/
 
 # strategy/, data/, utils/ MUST NOT import live/ or broker/
