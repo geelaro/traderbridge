@@ -177,6 +177,31 @@ class TestGridSearchMocked:
                 with pytest.raises(ValueError):
                     grid_search("weekly_macd", "AAPL")
 
+    def test_failed_combination_is_logged(self, ohlcv, monkeypatch, caplog):
+        import logging
+        import engine.optimize as optimize_module
+        from data import DataProvider
+
+        class Params:
+            grid = {"broken": [1]}
+
+        class BrokenStrategy:
+            def __init__(self, **kwargs):
+                self.params = Params()
+
+            def calculate_indicators(self, df):
+                raise ValueError("bad indicator input")
+
+        monkeypatch.setitem(optimize_module._STRATEGY_MAP, "weekly_macd", BrokenStrategy)
+        caplog.set_level(logging.WARNING, logger="engine.optimize")
+        with patch.object(DataProvider, "get_daily", return_value=ohlcv):
+            results = optimize_module.grid_search("weekly_macd", "AAPL", top_n=1)
+
+        assert results == []
+        assert "Skipping optimization combination" in caplog.text
+        assert "{'broken': 1}" in caplog.text
+        assert "bad indicator input" in caplog.text
+
 
 # ===================================================================
 # walk_forward signature and smoke

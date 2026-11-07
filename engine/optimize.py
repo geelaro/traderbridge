@@ -8,6 +8,7 @@ Usage:
 
 import argparse
 import itertools
+import logging
 import os
 import sys
 from dataclasses import dataclass, field
@@ -27,6 +28,8 @@ from tqdm import tqdm
 from data import DataProvider
 from strategy import STRATEGY_MAP as _STRATEGY_MAP
 from engine.trader import BacktestEngine
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 def _next_trading_day(date_str: str) -> str:
@@ -129,7 +132,11 @@ def grid_search(
             engine = BacktestEngine(initial_capital=initial_capital)
             bench = engine.run(strategy, df_sig)
             r = engine.get_result(bench)
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "Skipping optimization combination for %s %s: %s",
+                strategy_name, params, exc,
+            )
             continue
 
         opt = OptResult(
@@ -238,7 +245,11 @@ def walk_forward(
             engine = BacktestEngine(initial_capital=current_capital)
             bench = engine.run(strategy, df_sig)
             r = engine.get_result(bench)
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "Skipping walk-forward test window %s %s-%s for %s: %s",
+                symbol, test_start, test_end, strategy_name, exc,
+            )
             window_start += pd.DateOffset(years=test_years)
             continue
 
