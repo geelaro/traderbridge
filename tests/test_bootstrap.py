@@ -10,6 +10,9 @@ from utils import bootstrap
 
 
 _RUNTIME_ENTRYPOINTS = (
+    "dashboard.py",
+    "daily.py",
+    "live_trader.py",
     "scripts/check_golden_drift.py",
     "scripts/compare_factor_attribution.py",
     "scripts/diagnose_turtle.py",
@@ -25,8 +28,8 @@ _RUNTIME_ENTRYPOINTS = (
     "engine/portfolio.py",
     "engine/trader.py",
 )
-_RUNTIME_IMPORTS = {"analysis", "data", "engine", "matplotlib", "numpy",
-                    "pandas", "strategy"}
+_RUNTIME_IMPORTS = {"analysis", "dashboard", "data", "engine", "matplotlib",
+                    "numpy", "pandas", "strategy"}
 
 
 def _imports_runtime_dependency(node):

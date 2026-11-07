@@ -40,7 +40,7 @@ Flat single-package layout — everything is at the top level. No `src/` layout,
 | `dashboard/` | 3139 | Streamlit UI — **4 top-level tabs** (研究/绩效/风控/设置) with nested sub-tabs, pure render |
 | `utils/` | 1787 | Cross-cutting — notify (Feishu) / sizing / risk / market_state / signal_gate / logging / sectors |
 | `scripts/` | 364 | Cron entry — `weekly_risk_report.py` etc. |
-| `tests/` | **67 files** | **1388 passed, 2 skipped**; **79.0%** runtime coverage on 2026-11-07 |
+| `tests/` | **67 files** | **1391 passed, 2 skipped**; **79.0%** runtime coverage on 2026-11-07 |
 | `docs/` | — | `architecture.md` (full design doc) |
 
 Entry points: `live_trader.py`, `daily.py`, `dashboard.py`, `scripts/weekly_risk_report.py`. None are importable as libraries — they're scripts.
