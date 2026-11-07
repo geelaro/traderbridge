@@ -14,6 +14,8 @@ Import/ImportFrom/Attribute nodes, not string literals.
 from __future__ import annotations
 
 import ast
+import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
@@ -112,6 +114,21 @@ class TestAnalysisDoesNotImportLive:
                 if mod == "live":
                     violations.append(f"{path.relative_to(ROOT).as_posix()}:{lineno}")
         assert not violations, f"analysis/ must not import live/: {violations}"
+
+    def test_import_does_not_load_futu_sdk(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import analysis, sys; assert 'futu' not in sys.modules",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        assert result.returncode == 0, result.stderr
 
 
 class TestLowLayersDoNotImportLiveOrBroker:

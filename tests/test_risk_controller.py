@@ -163,12 +163,10 @@ class TestCheckGlobal:
 
         assert controller.check_global(account, {}) is False
 
-        calls = {
-            call.args[0]: call.args[1]
-            for call in controller.cache.save_risk_state.call_args_list
-        }
+        calls = controller.cache.save_risk_state_many.call_args.args[0]
         assert calls["trading_paused"] == "True"
         assert "日内亏损超限" in calls["pause_reason"]
+        assert "risk_operational_snapshot" in calls
 
     def test_operational_snapshot_contains_utilisation_and_limits(self, controller, account):
         controller.risk._day_start_equity = 100_000.0
@@ -240,12 +238,16 @@ class TestPassesRisk:
 
 
 class TestStatePersistence:
-    def test_persist_state_calls_cache(self, controller):
+    def test_persist_state_writes_related_keys_atomically(self, controller):
         controller.risk._date = "2025-01-15"
         controller.risk._day_start_equity = 100_000.0
         controller.risk._peak_equity = 110_000.0
         controller.persist_state()
-        assert controller.cache.save_risk_state.call_count >= 4
+        values = controller.cache.save_risk_state_many.call_args.args[0]
+        assert values["date"] == "2025-01-15"
+        assert values["peak_equity"] == "110000.0"
+        assert "trading_paused" in values
+        controller.cache.save_risk_state.assert_not_called()
 
     def test_restore_state_loads_from_cache(self, risk_limits, mock_cache, mock_broker, mock_notifier):
         mock_cache.load_risk_state.side_effect = lambda key: {

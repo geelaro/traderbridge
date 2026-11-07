@@ -89,17 +89,27 @@ class RiskController:
         }
 
     def persist_state(self):
-        self.cache.save_risk_state("date", self.risk._date)
-        self.cache.save_risk_state("day_start_equity", str(self.risk._day_start_equity))
-        self.cache.save_risk_state("peak_equity", str(self.risk._peak_equity))
-        self.cache.save_risk_state("consecutive_losses", str(self.risk._consecutive_losses))
-        self.cache.save_risk_state("daily_trade_count", str(self.risk._daily_trade_count))
-        self._persist_pause_state()
+        self.cache.save_risk_state_many({
+            "date": self.risk._date,
+            "day_start_equity": str(self.risk._day_start_equity),
+            "peak_equity": str(self.risk._peak_equity),
+            "consecutive_losses": str(self.risk._consecutive_losses),
+            "daily_trade_count": str(self.risk._daily_trade_count),
+            "trading_paused": str(bool(self.trading_paused)),
+            "pause_reason": self.pause_reason,
+        })
 
-    def _persist_pause_state(self):
-        """Persist the operational pause state used by dashboard readers."""
-        self.cache.save_risk_state("trading_paused", str(bool(self.trading_paused)))
-        self.cache.save_risk_state("pause_reason", self.pause_reason)
+    def _persist_pause_state(self, operational_snapshot=None):
+        """Persist pause state and its matching dashboard snapshot together."""
+        values = {
+            "trading_paused": str(bool(self.trading_paused)),
+            "pause_reason": self.pause_reason,
+        }
+        if operational_snapshot is not None:
+            values["risk_operational_snapshot"] = json.dumps(
+                operational_snapshot, ensure_ascii=False,
+            )
+        self.cache.save_risk_state_many(values)
 
     def risk_snapshot(self, account=None, positions: dict | None = None) -> dict:
         """Return the current operational risk state for monitoring surfaces.
@@ -175,11 +185,7 @@ class RiskController:
         # latch reset only at midnight.
         self.trading_paused = paused
         self.pause_reason = reason
-        self._persist_pause_state()
-        self.cache.save_risk_state(
-            "risk_operational_snapshot",
-            json.dumps(self.risk_snapshot(account, positions), ensure_ascii=False),
-        )
+        self._persist_pause_state(self.risk_snapshot(account, positions))
 
         if self.trading_paused:
             print(f"\n  !! 交易暂停: {self.pause_reason}")

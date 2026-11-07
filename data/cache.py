@@ -471,6 +471,25 @@ class StateStore(_CacheBase):
         with self._lock:
             self._save_risk_state(key, value)
 
+    def save_risk_state_many(self, values: dict[str, str]):
+        """Persist related risk-state keys as one atomic write."""
+        if not values:
+            return
+        with self._lock:
+            self.init_schema()
+            self.conn.execute("SAVEPOINT save_risk_state_many")
+            try:
+                self.conn.executemany(
+                    "INSERT OR REPLACE INTO risk_state (key, value) VALUES (?, ?)",
+                    list(values.items()),
+                )
+                self.conn.execute("RELEASE SAVEPOINT save_risk_state_many")
+            except Exception:
+                self.conn.execute("ROLLBACK TO SAVEPOINT save_risk_state_many")
+                self.conn.execute("RELEASE SAVEPOINT save_risk_state_many")
+                raise
+            self._commit()
+
     def _save_risk_state(self, key: str, value: str):
         self.init_schema()
         self.conn.execute(

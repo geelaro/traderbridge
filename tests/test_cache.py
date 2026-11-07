@@ -1,5 +1,7 @@
 """Tests for data/cache.py — CacheManager."""
 
+import sqlite3
+
 import pytest
 from data.cache import CacheManager
 
@@ -142,6 +144,25 @@ class TestRiskState:
         assert temp_cache.load_risk_state("date") == "2025-06-01"
         assert temp_cache.load_risk_state("consecutive_losses") == "1"
         assert temp_cache.load_risk_state("daily_trade_count") == "4"
+
+    def test_save_many_is_atomic_on_failure(self, temp_cache):
+        temp_cache.init_schema()
+        temp_cache.conn.execute(
+            """CREATE TRIGGER reject_risk_state_insert
+               BEFORE INSERT ON risk_state WHEN NEW.key = 'reject'
+               BEGIN SELECT RAISE(ABORT, 'forced failure'); END"""
+        )
+
+        with pytest.raises(sqlite3.IntegrityError):
+            temp_cache.save_risk_state_many({"first": "1", "reject": "x"})
+
+        assert temp_cache.load_risk_state("first") is None
+
+    def test_save_many_roundtrip(self, temp_cache):
+        temp_cache.save_risk_state_many({"date": "2026-11-07", "count": "3"})
+
+        assert temp_cache.load_risk_state("date") == "2026-11-07"
+        assert temp_cache.load_risk_state("count") == "3"
 
 
 class TestAlertHistory:
