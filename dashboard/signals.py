@@ -8,7 +8,7 @@ import streamlit as st
 from utils import get_logger
 from utils.market_state import MarketStateClassifier, MarketRegime, Volatility
 from strategy import SIGNAL_LABEL
-from analysis.risk_monitor import compute_risk_state, RiskLevel
+from analysis.risk_monitor import compute_risk_state, compute_symbol_sentiment, RiskLevel
 from data.realtime import get_realtime_vix, get_fear_greed
 from live.position_stops import compute_hypothetical_positions
 
@@ -373,14 +373,29 @@ def render_signal_detail(config, target_date, provider, cache):
         # using yesterday's close (typical pre-US-close) vs today's close.
         bar_date_full = str(primary.get("bar_date", "") or "")
         bar_date_short = bar_date_full[5:10] if len(bar_date_full) >= 10 else "—"
+        stock_sentiment = primary.get("symbol_sentiment")
+        sentiment_tag = (
+            f" · {stock_sentiment['label']} {stock_sentiment['score']:.0f}/100"
+            if stock_sentiment else " · 情绪数据不足"
+        )
 
         title = (
             f"{cfg['icon']} {sym}  {cfg['label']}  @ ${price:.2f} ({bar_date_short})  "
-            f"({primary['strategy']})"
+            f"({primary['strategy']}){sentiment_tag}"
         )
         with st.expander(title, expanded=False):
             if bar_date_full:
                 st.caption(f"📅 数据来自 **{bar_date_full}** 的日 K 收盘价")
+            if stock_sentiment:
+                st.caption(
+                    f"个股情绪：{stock_sentiment['label']} "
+                    f"{stock_sentiment['score']:.1f}/100 · "
+                    f"RSI14 {stock_sentiment['rsi14']:.1f} · "
+                    f"距 MA200 {stock_sentiment['vs_ma200_pct']:+.1f}% · "
+                    f"数据截至 {stock_sentiment['as_of']}"
+                )
+            else:
+                st.caption("个股情绪：历史行情不足，暂不可判定")
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("触发价", f"${price:.2f}")
             c2.metric("ATR(14)", f"${atr:.2f}" if atr > 0 else "—")
@@ -513,9 +528,27 @@ def render_position_watch(config, target_date, provider):
         st.divider()
         return
 
+    lookback = max(config.get("scanner", {}).get("lookback_years", 3), 2)
+    start = (pd.Timestamp(target_date) - pd.DateOffset(years=lookback)).strftime("%Y-%m-%d")
+    end = pd.Timestamp(target_date).date().isoformat()
+    sentiments = {}
+    for symbol in {row["symbol"] for row in rows}:
+        try:
+            df = provider.get_daily(symbol, start=start, end=end)
+            sentiments[symbol] = compute_symbol_sentiment(df)
+        except Exception as exc:
+            logger.warning("个股情绪计算失败 %s: %s", symbol, exc)
+            sentiments[symbol] = None
+
     df_display = pd.DataFrame([{
         "标的": r["symbol"],
         "策略": r["strategy"],
+        "个股情绪": (
+            f"{sentiments[r['symbol']]['label']} "
+            f"{sentiments[r['symbol']]['score']:.0f}/100 · "
+            f"{sentiments[r['symbol']]['as_of']}"
+            if sentiments.get(r["symbol"]) else "数据不足"
+        ),
         "入场日": r["entry_date"],
         "入场价": f"${r['entry_price']:.2f}",
         "当前价": f"${r['current_price']:.2f}",

@@ -14,7 +14,7 @@
 | 维度 | 数据 |
 |------|------|
 | 业务代码 | ~19,000 行 Python |
-| 测试 | **1406 passed / 2 skipped / 67 文件 / 79.7% 覆盖率** |
+| 测试 | **1408 passed / 2 skipped / 67 文件 / 79.6% 覆盖率** |
 | Dashboard tab | **11 个** |
 | 数据源 | 6 个(sina_us / tencent / cboe / yahoo_chart / yahoo_realtime / futu) |
 | 策略库 | 13 个(9 active + 3 弃用 + 1 ensemble) |
@@ -215,7 +215,7 @@ traderbridge/
   scripts/           # 命令入口 (4 文件 / 364 行)
   └─ weekly_risk_report.py  #   cron 入口,周报推飞书
 
-  tests/             # 1406 passed, 2 skipped (67 文件 / 12903 行)
+  tests/             # 1408 passed, 2 skipped (67 文件 / 12933 行)
   docs/              # 架构文档
   └─ architecture.md
   reports/           # 自动生成的 CSV + PNG
@@ -236,7 +236,7 @@ traderbridge/
 # Python 3.10+
 pip install pipenv
 pipenv install --dev
-pipenv run pytest -q   # 1406 passed / 2 skipped
+pipenv run pytest -q   # 1408 passed / 2 skipped
 ```
 
 **国内必须配置代理**(Yahoo / GitHub 直连不通)。在 `.env` 写:

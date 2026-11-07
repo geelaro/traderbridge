@@ -19,6 +19,7 @@ import pandas as pd
 
 from data import DataProvider
 from data.cache import CacheManager
+from analysis.risk_monitor import compute_symbol_sentiment
 from strategy import SIGNAL_LABEL
 from utils import get_logger, load_toml
 from utils.notify import Notifier
@@ -63,6 +64,10 @@ def scan_day(
 
     # --- data quality checks + display (presentation layer) ------------------
     scanned_symbols = set()
+    results_by_symbol: dict[str, list[dict]] = {}
+    for result in results:
+        results_by_symbol.setdefault(result["symbol"], []).append(result)
+
     for r in results:
         sym = r["symbol"]
         if sym in scanned_symbols:
@@ -73,7 +78,13 @@ def scan_day(
             pd.Timestamp(target_date) - pd.DateOffset(years=lookback)
         ).strftime("%Y-%m-%d"), end=target_date)
         if df is None or df.empty:
+            for signal in results_by_symbol[sym]:
+                signal["symbol_sentiment"] = None
             continue
+
+        sentiment = compute_symbol_sentiment(df)
+        for signal in results_by_symbol[sym]:
+            signal["symbol_sentiment"] = sentiment
 
         latest = df.index[-1]
         age_days = (pd.Timestamp(target_date) - latest).days

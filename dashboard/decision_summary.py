@@ -359,7 +359,15 @@ def render_decision_summary(summary: dict) -> None:
             if summary["signals"]:
                 for s in summary["signals"]:
                     tag = "买入" if s["signal"] == 1 else "卖出"
-                    st.write(f"- {s['symbol']} {s['strategy']}: {tag} @ {s.get('price', 0):.2f}")
+                    sentiment = s.get("symbol_sentiment")
+                    sentiment_tag = (
+                        f" · {sentiment['label']} {sentiment['score']:.0f}/100"
+                        if sentiment else " · 情绪数据不足"
+                    )
+                    st.write(
+                        f"- {s['symbol']} {s['strategy']}: {tag} "
+                        f"@ {s.get('price', 0):.2f}{sentiment_tag}"
+                    )
             else:
                 st.caption("今日无信号")
 

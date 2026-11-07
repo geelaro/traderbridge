@@ -103,6 +103,7 @@ class TestScanDay:
             assert "symbol" in r
             assert "strategy" in r
             assert "signal" in r
+            assert "symbol_sentiment" in r
             assert r["symbol"] == "TEST"
 
     def test_respects_active_monitor_split(self, temp_cache):

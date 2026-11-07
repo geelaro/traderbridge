@@ -135,6 +135,46 @@ def _sentiment_score(ma_pct: float, ret_20d: float, rsi: float, p: dict) -> dict
     }
 
 
+def compute_symbol_sentiment(
+    df: pd.DataFrame, params: Optional[dict] = None,
+) -> Optional[dict]:
+    """Return a 0-100 oversold/overbought snapshot for one symbol.
+
+    Uses the same RSI, MA200 extension, and 20-day momentum blend as the
+    SPY/QQQ market sentiment display. Returns ``None`` until there is enough
+    clean daily history; it is display-only and does not imply a trade action.
+    """
+    p = {**_DEFAULTS, **(params or {})}
+    if df is None or df.empty or "Close" not in df.columns:
+        return None
+
+    close = pd.to_numeric(df["Close"], errors="coerce").dropna().astype(float)
+    ma_period = int(p["ma200_period"])
+    required = ma_period + 20
+    if len(close) < required:
+        return None
+
+    ma200 = float(close.rolling(ma_period).mean().iloc[-1])
+    if not pd.notna(ma200) or ma200 <= 0:
+        return None
+    last_close = float(close.iloc[-1])
+    if last_close <= 0:
+        return None
+
+    ma_pct = (last_close / ma200 - 1) * 100
+    ret_20d = (last_close / float(close.iloc[-21]) - 1) * 100
+    rsi = _rsi(close, int(p["rsi_period"]))
+    sentiment = _sentiment_score(ma_pct, ret_20d, rsi, p)
+    as_of = pd.Timestamp(close.index[-1]).date().isoformat()
+    return {
+        **sentiment,
+        "rsi14": round(rsi, 1),
+        "vs_ma200_pct": round(ma_pct, 2),
+        "ret_20d_pct": round(ret_20d, 2),
+        "as_of": as_of,
+    }
+
+
 def _top_risk(ma_pct: float, ret_20d: float, rsi: float, p: dict, label: str):
     """Retain the legacy chase-risk fields for compatible consumers."""
     reasons: List[str] = []

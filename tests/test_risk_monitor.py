@@ -4,7 +4,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from analysis.risk_monitor import compute_risk_state, RiskLevel, RiskState
+from analysis.risk_monitor import (
+    compute_risk_state,
+    compute_symbol_sentiment,
+    RiskLevel,
+    RiskState,
+)
 
 
 def _synthetic_spy(close_path, start="2020-01-01"):
@@ -226,6 +231,24 @@ class TestMarketSentiment:
         assert state.indicators["spy_sentiment_score"] > 65
         assert state.indicators["qqq_sentiment_score"] < 35
         assert "rsi" in state.market_sentiments["SPY"]["components"]
+
+    def test_individual_symbol_sentiment_uses_shared_scale(self):
+        overbought = _synthetic_spy(np.linspace(300, 500, 300))
+        oversold = _synthetic_spy(np.linspace(500, 300, 300))
+
+        hot = compute_symbol_sentiment(overbought)
+        cold = compute_symbol_sentiment(oversold)
+
+        assert hot["score"] > 65
+        assert hot["label"] in {"超买", "极度超买"}
+        assert cold["score"] < 35
+        assert cold["label"] in {"超卖", "极度超卖"}
+        assert hot["as_of"] == overbought.index[-1].date().isoformat()
+        assert {"rsi", "ma200_extension", "momentum_20d"} <= hot["components"].keys()
+
+    def test_individual_symbol_sentiment_unavailable_with_short_history(self):
+        short = _synthetic_spy(np.linspace(300, 400, 100))
+        assert compute_symbol_sentiment(short) is None
 
 
 # ===================================================================
