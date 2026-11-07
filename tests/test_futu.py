@@ -218,11 +218,37 @@ class TestFutuBrokerInterface:
 class TestRefreshPrices:
     def test_no_connection_returns_empty(self):
         broker = FutuBroker()
+        broker.last_prices["AAPL"] = 195.0
         broker.connect = lambda: None  # prevent real connection
         broker._quote_ctx = None
         result = broker.refresh_prices(["AAPL"])
         assert isinstance(result, dict)
         assert result == {}
+
+    def test_failed_refresh_discards_requested_stale_prices(self):
+        broker = FutuBroker()
+        broker._quote_ctx = MagicMock()
+        broker.last_prices["AAPL"] = 195.0
+        broker._quote_ctx.get_market_snapshot.return_value = (-1, "quote unavailable")
+
+        result = broker.refresh_prices(["AAPL"])
+
+        assert "AAPL" not in result
+
+    def test_partial_refresh_does_not_keep_missing_symbols_stale(self):
+        import pandas as pd
+
+        broker = FutuBroker()
+        broker._quote_ctx = MagicMock()
+        broker.last_prices.update({"AAPL": 195.0, "NVDA": 800.0})
+        broker._quote_ctx.get_market_snapshot.return_value = (0, pd.DataFrame([{
+            "code": "US.AAPL", "last_price": 200.0,
+        }]))
+
+        result = broker.refresh_prices(["AAPL", "NVDA"])
+
+        assert result["AAPL"] == 200.0
+        assert "NVDA" not in result
 
     def test_mocked_prices_filled(self):
         """refresh_prices with mocked quote ctx fills last_prices."""

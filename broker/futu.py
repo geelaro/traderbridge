@@ -442,24 +442,38 @@ class FutuBroker(Broker):
     # ------------------------------------------------------------------
 
     def refresh_prices(self, symbols: List[str]) -> Dict[str, float]:
-        """Update last_prices from real-time quotes."""
+        """Refresh requested quotes without exposing stale values on failure."""
+        requested = {}
+        stale_keys = set()
+        for symbol in symbols:
+            futu_symbol = _to_futu_symbol(symbol)
+            requested.setdefault(futu_symbol, symbol.strip().upper())
+            stale_keys.add(symbol.strip().upper())
+            stale_keys.add(futu_symbol.split(".")[-1])
+        for key in stale_keys:
+            self.last_prices.pop(key, None)
+        if not requested:
+            return self.last_prices
+
         if self._quote_ctx is None:
             self.connect()
         if self._quote_ctx is None:
             return self.last_prices
 
-        futu_symbols = [_to_futu_symbol(s) for s in symbols]
+        futu_symbols = list(requested)
         try:
             ret, data = self._quote_ctx.get_market_snapshot(futu_symbols)
-            if ret == 0 and not data.empty:
-                for _, row in data.iterrows():
-                    futu_sym = row.get("code", "")
-                    sym = futu_sym.split(".")[-1]
-                    price = float(row.get("last_price", 0))
-                    if price > 0:
-                        self.last_prices[sym] = price
-        except Exception:
-            pass
+            if ret != 0 or data is None or data.empty:
+                logger.warning("Futu quote snapshot unavailable (ret=%s): %s", ret, data)
+                return self.last_prices
+            for _, row in data.iterrows():
+                futu_sym = row.get("code", "")
+                sym = futu_sym.split(".")[-1]
+                price = float(row.get("last_price", 0))
+                if price > 0:
+                    self.last_prices[sym] = price
+        except Exception as exc:
+            logger.warning("Futu quote snapshot failed: %s", exc)
         return self.last_prices
 
     def get_historical_kline(self, symbol: str, start: str, end: str):
