@@ -163,10 +163,7 @@ class SignalScanner:
             strat_params = item.get("params", {})
             strategy = STRATEGY_MAP[strat_name](**strat_params)
             try:
-                try:
-                    df_sig = strategy.calculate_indicators(df, df_weekly=df_weekly)
-                except TypeError:
-                    df_sig = strategy.calculate_indicators(df)
+                df_sig = strategy.calculate_indicators(df, df_weekly=df_weekly)
             except Exception:
                 logger.exception("策略计算失败: %s %s", symbol, strat_name)
                 continue

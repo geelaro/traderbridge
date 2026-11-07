@@ -111,6 +111,26 @@ class TestSignalScannerScan:
         results = scanner.scan(minimal_config, target_date="2021-01-04")
         assert len(results) > 0
 
+    def test_strategy_type_error_is_not_retried_without_weekly_data(
+        self, scanner, minimal_config, monkeypatch,
+    ):
+        import utils.signal_scanner as scanner_module
+
+        calls = []
+
+        class BrokenStrategy:
+            def __init__(self, **kwargs):
+                pass
+
+            def calculate_indicators(self, df, df_weekly=None):
+                calls.append(df_weekly)
+                raise TypeError("strategy implementation bug")
+
+        monkeypatch.setitem(scanner_module.STRATEGY_MAP, "weekly_macd", BrokenStrategy)
+
+        assert scanner.scan(minimal_config, target_date="2021-01-04") == []
+        assert len(calls) == 1
+
 
 # ---------------------------------------------------------------------------
 # Missing target date — falls back to latest bar, never skips
