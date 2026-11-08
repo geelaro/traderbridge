@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import List, Optional
 import pandas as pd
+import re
 
 # ---------------------------------------------------------------------------
 # Canonical column layout — every source MUST return a DataFrame with these
@@ -127,6 +128,8 @@ CN_SYMBOLS = {
     "159915": "sz159915",
 }
 
+_US_CLASS_SHARE_RE = re.compile(r"^[A-Z]{1,5}[.-][A-Z]$")
+
 
 def classify_symbol(symbol: str) -> str:
     """Return market tag: 'us', 'cn', 'vix', or 'global'."""
@@ -143,6 +146,7 @@ def classify_symbol(symbol: str) -> str:
     if s[:2] in ("SH", "SZ") and s[2:].isdigit() and len(s[2:]) == 6:
         return "cn"
     # US stocks are 1-5 uppercase letters
-    if s.isalpha() and 1 <= len(s) <= 5:
+    # Class-share tickers such as BRK.B / BRK-B are routed to Yahoo.
+    if (s.isalpha() and 1 <= len(s) <= 5) or _US_CLASS_SHARE_RE.fullmatch(s):
         return "us"
     return "global"

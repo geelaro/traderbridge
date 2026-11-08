@@ -33,6 +33,9 @@ def _make_session() -> requests.Session:
 
 _ET = ZoneInfo("America/New_York")
 
+_YAHOO_CLASS_SHARE_RE = re.compile(r"^[A-Z]{1,5}\.[A-Z]$")
+_US_CLASS_SHARE_RE = re.compile(r"^[A-Z]{1,5}[.-][A-Z]$")
+
 
 def _et_today_naive() -> pd.Timestamp:
     """Current US/Eastern date as a naive Timestamp at midnight.
@@ -409,7 +412,9 @@ class SinaUSSource(DataSource):
 
     def supports(self, symbol: str) -> bool:
         sym = symbol.upper().strip()
-        return sym.isalpha() and 1 <= len(sym) <= 5
+        return (
+            sym.isalpha() and 1 <= len(sym) <= 5
+        ) or _US_CLASS_SHARE_RE.fullmatch(sym) is not None
 
     def fetch(self, symbol: str, start: str, end: str) -> pd.DataFrame:
         sym = symbol.upper()
@@ -480,6 +485,7 @@ class YahooChartSource(DataSource):
 
     def fetch(self, symbol: str, start: str, end: str) -> pd.DataFrame:
         sym = symbol.upper()
+        yahoo_sym = sym.replace(".", "-") if _YAHOO_CLASS_SHARE_RE.fullmatch(sym) else sym
         try:
             t1 = int(pd.Timestamp(start).timestamp())
             t2 = int(pd.Timestamp(end).timestamp())
@@ -493,7 +499,7 @@ class YahooChartSource(DataSource):
         }
         try:
             s = _yahoo_session()
-            r = s.get(f"{self.URL}/{sym}", params=params, timeout=30)
+            r = s.get(f"{self.URL}/{yahoo_sym}", params=params, timeout=30)
             r.raise_for_status()
         except (requests.RequestException, ValueError) as e:
             logger.warning("YahooChart fetch error for %s: %s", sym, e)

@@ -28,6 +28,10 @@ class TestClassifySymbol:
         assert classify_symbol("AAPL") == "us"
         assert classify_symbol("NVDA") == "us"
 
+    def test_us_class_share(self):
+        assert classify_symbol("BRK.B") == "us"
+        assert classify_symbol("BRK-B") == "us"
+
     def test_cn_digit(self):
         assert classify_symbol("510300") == "cn"
         assert classify_symbol("159919") == "cn"
@@ -134,6 +138,7 @@ class TestSourceSupports:
         assert src.supports("AAPL")
         assert src.supports("NVDA")
         assert src.supports("QQQ")
+        assert src.supports("BRK.B")
         assert not src.supports("510300")
 
     def test_yahoo_chart_knows_us(self):
@@ -615,6 +620,19 @@ class TestYahooChartSourceFetch:
         with patch("data.sources._yahoo_session", return_value=mock_session):
             df = src.fetch("AAPL", "2025-01-01", "2025-01-10")
             assert df.empty
+
+    def test_fetch_maps_dot_class_share_for_yahoo(self):
+        mock_session = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = _MOCK_YAHOO_RESP
+        mock_resp.raise_for_status = MagicMock()
+        mock_session.get.return_value = mock_resp
+
+        src = YahooChartSource()
+        with patch("data.sources._yahoo_session", return_value=mock_session):
+            src.fetch("BRK.B", "2025-01-01", "2025-01-10")
+
+        assert mock_session.get.call_args.args[0].endswith("/BRK-B")
 
     def test_fetch_request_exception(self):
         import requests as req
