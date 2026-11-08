@@ -94,6 +94,18 @@ name = "Alphabet"
 active = "weekly_macd_kdj"
 monitor = ["spy_ma_breakout"]
 
+[[watchlist]]
+symbol = "KO"
+name = "Coca-Cola"
+active = "weekly_macd_kdj"
+monitor = ["spy_ma_breakout"]
+
+[[watchlist]]
+symbol = "BRK.B"
+name = "Berkshire Hathaway B"
+active = "weekly_macd_kdj"
+monitor = ["spy_ma_breakout"]
+
 [strategy.weekly_macd]
 macd_fast = 12
 macd_slow = 26
