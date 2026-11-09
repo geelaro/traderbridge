@@ -48,7 +48,8 @@ def main():
     config = load_toml("watchlist.toml")
     symbols = [item["symbol"] for item in config.get("watchlist", [])]
 
-    selected_symbol = st.sidebar.selectbox("标的", symbols)
+    default_symbol_index = symbols.index("QQQ") if "QQQ" in symbols else 0
+    selected_symbol = st.sidebar.selectbox("标的", symbols, index=default_symbol_index)
 
     strategy_options = list(STRATEGY_MAP.keys())
     selected_strategy = st.sidebar.selectbox("策略", strategy_options, index=2)

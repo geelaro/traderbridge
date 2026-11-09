@@ -587,7 +587,7 @@ class BacktestEngine:
 
 
 
-def run_backtest(symbol="AAPL", start="2020-01-01", end=None,
+def run_backtest(symbol="QQQ", start="2020-01-01", end=None,
                  initial_capital=10000, strategy_cls=None,
                  commission_rate=0.0003, slippage_pct=0.0001,
                  sizing_mode="fixed_capital", risk_per_trade=0.005,
@@ -675,7 +675,7 @@ def print_result(result):
                   f"{t.exit_reason:<10}")
 
 
-def plot_result(result, df, symbol="AAPL", save_path=None, show=True):
+def plot_result(result, df, symbol="QQQ", save_path=None, show=True):
     """Plot backtest results: price + trades, equity curve, drawdown."""
     try:
         setup_chinese_font()
@@ -758,6 +758,6 @@ def plot_result(result, df, symbol="AAPL", save_path=None, show=True):
 
 
 if __name__ == "__main__":
-    result, df = run_backtest(symbol="AAPL", start="2020-01-01")
+    result, df = run_backtest(symbol="QQQ", start="2020-01-01")
     print_result(result)
-    plot_result(result, df, symbol="AAPL")
+    plot_result(result, df, symbol="QQQ")
