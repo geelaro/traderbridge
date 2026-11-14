@@ -123,6 +123,25 @@ class TestComputeHypotheticalPositions:
         result = compute_hypothetical_positions(config, pd.Timestamp("2025-03-15"), provider)
         assert result == []
 
+    def test_include_closed_returns_all_watchlist_symbols(self):
+        flat = pd.DataFrame({
+            "Open": 100, "High": 100, "Low": 100,
+            "Close": 100, "Volume": 1_000_000,
+        }, index=pd.bdate_range("2025-01-01", periods=60))
+        provider = _make_provider({"AAPL": flat, "MSFT": flat})
+        config = {
+            "watchlist": [
+                {"symbol": "AAPL", "active": "weekly_macd_kdj"},
+                {"symbol": "MSFT", "active": "weekly_macd_kdj"},
+            ],
+        }
+        result = compute_hypothetical_positions(
+            config, pd.Timestamp("2025-03-15"), provider, include_closed=True,
+        )
+
+        assert [row["symbol"] for row in result] == ["AAPL", "MSFT"]
+        assert all(row["status"] == "卖出" for row in result)
+
     def test_symbols_filter_restricts_processing(self):
         provider = _make_provider({"AAPL": _trending_df(), "MSFT": _trending_df()})
         config = {

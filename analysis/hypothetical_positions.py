@@ -31,6 +31,7 @@ Position-dict schema::
     {
         "symbol":         str,
         "strategy":       str,
+        "status":         "持有" | "卖出",
         "entry_date":     "YYYY-MM-DD",
         "entry_price":    float,
         "current_price":  float,
@@ -76,6 +77,7 @@ def compute_hypothetical_positions(
     target_date,
     provider,
     symbols: Optional[Iterable[str]] = None,
+    include_closed: bool = False,
 ) -> List[dict]:
     """For each watchlist symbol with an active single-strategy, return a
     hypothetical-position dict including Chandelier trailing stop.
@@ -92,13 +94,19 @@ def compute_hypothetical_positions(
         Anything exposing ``get_daily(symbol, start, end) -> DataFrame``.
     symbols : iterable of str, optional
         Restrict to this subset of watchlist symbols.  Defaults to all.
+    include_closed : bool, optional
+        Include every watchlist symbol with ``status="卖出"`` when it does
+        not have an open simulated buy.  The default keeps the historical
+        open-positions-only behavior for risk and alert consumers.
 
     Returns
     -------
     list of dict
-        Sorted by ``distance_pct`` ascending (closest to stop first).
-        Symbols without an open simulated trade, with missing ATR, or with
-        zero/negative prices are skipped silently.
+        Open positions are sorted by ``distance_pct`` ascending (closest to
+        stop first), followed by closed symbols when ``include_closed`` is
+        true.  Symbols without an open simulated trade, with missing ATR, or
+        with zero/negative prices are skipped silently unless closed rows are
+        requested.
     """
     lookback_years = config.get("scanner", {}).get("lookback_years", 3)
     start = (pd.Timestamp(target_date) - pd.DateOffset(years=lookback_years)).strftime("%Y-%m-%d")
@@ -108,6 +116,20 @@ def compute_hypothetical_positions(
     sym_filter = set(symbols) if symbols is not None else None
     rows: List[dict] = []
 
+    def closed_row(symbol: str, strategy: str, current_price=None) -> dict:
+        return {
+            "symbol": symbol,
+            "strategy": strategy,
+            "status": "卖出",
+            "entry_date": None,
+            "entry_price": None,
+            "current_price": current_price,
+            "pnl_pct": None,
+            "stop_price": None,
+            "distance_pct": None,
+            "days_held": None,
+        }
+
     for item in config.get("watchlist", []):
         symbol = item.get("symbol")
         if not symbol:
@@ -115,17 +137,24 @@ def compute_hypothetical_positions(
         if sym_filter is not None and symbol not in sym_filter:
             continue
         strat_name = item.get("active", "")
+        strategy_label = strat_name if isinstance(strat_name, str) else "组合策略"
         # Skip ensembles (list-typed active) or unknown strategies — we need
         # a single concrete strategy to estimate the Chandelier stop.
         if not isinstance(strat_name, str) or strat_name not in STRATEGY_MAP:
+            if include_closed:
+                rows.append(closed_row(symbol, strategy_label))
             continue
 
         try:
             df = provider.get_daily(symbol, start=start, end=end)
         except Exception as exc:
             logger.debug("position stops fetch failed for %s: %s", symbol, exc)
+            if include_closed:
+                rows.append(closed_row(symbol, strategy_label))
             continue
         if df is None or df.empty:
+            if include_closed:
+                rows.append(closed_row(symbol, strategy_label))
             continue
 
         params = config.get("strategy", {}).get(strat_name, {})
@@ -135,10 +164,18 @@ def compute_hypothetical_positions(
         except Exception as exc:
             logger.debug("position stops indicators failed for %s/%s: %s",
                          symbol, strat_name, exc)
+            if include_closed:
+                rows.append(closed_row(symbol, strategy_label))
             continue
 
         idx_entry = _find_open_simulated_trade(df_sig)
         if idx_entry is None:
+            if include_closed:
+                try:
+                    current_price = float(df_sig["Close"].iloc[-1])
+                except (KeyError, IndexError, TypeError, ValueError):
+                    current_price = None
+                rows.append(closed_row(symbol, strategy_label, current_price))
             continue
 
         try:
@@ -147,8 +184,18 @@ def compute_hypothetical_positions(
             current_price = float(df_sig["Close"].iloc[-1])
             atr = float(df_sig["ATR"].iloc[-1]) if "ATR" in df_sig.columns else 0.0
         except (KeyError, IndexError):
+            if include_closed:
+                rows.append({
+                    **closed_row(symbol, strategy_label),
+                    "status": "持有",
+                })
             continue
         if atr <= 0 or entry_price <= 0:
+            if include_closed:
+                rows.append({
+                    **closed_row(symbol, strategy_label, current_price),
+                    "status": "持有",
+                })
             continue
 
         track_col = "High" if "High" in df_sig.columns else "Close"
@@ -167,6 +214,7 @@ def compute_hypothetical_positions(
         rows.append({
             "symbol": symbol,
             "strategy": strat_name,
+            "status": "持有",
             "entry_date": entry_date.date().isoformat(),
             "entry_price": entry_price,
             "current_price": current_price,
@@ -176,5 +224,9 @@ def compute_hypothetical_positions(
             "days_held": days_held,
         })
 
-    rows.sort(key=lambda r: r["distance_pct"])
+    rows.sort(key=lambda r: (
+        0 if r["status"] == "持有" else 1,
+        r["distance_pct"] if r["distance_pct"] is not None else float("inf"),
+        r["symbol"],
+    ))
     return rows

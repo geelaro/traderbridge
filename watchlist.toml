@@ -59,6 +59,12 @@ active = "weekly_macd_kdj"
 monitor = ["spy_ma_breakout"]
 
 [[watchlist]]
+symbol = "EUV"
+name = "EUV ETF"
+active = "weekly_macd_kdj"
+monitor = ["spy_ma_breakout"]
+
+[[watchlist]]
 symbol = "SMH"
 name = "SMH"
 active = "weekly_macd_kdj"

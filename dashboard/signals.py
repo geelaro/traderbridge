@@ -513,11 +513,13 @@ def render_position_watch(config, target_date, provider):
     """
     st.subheader("假设持仓监控")
     st.caption(
-        "按 active 策略最近一次未平 buy 信号假设入场, "
-        "用 Chandelier 移动止损估算距离. 仅用于减仓预警, 不替代实盘持仓数据."
+        "展示全部 watchlist：按 active 策略最近一次未平 buy 信号判断持有状态，"
+        "并用 Chandelier 移动止损估算距离. 仅用于减仓预警, 不替代实盘持仓数据."
     )
 
-    rows = compute_hypothetical_positions(config, target_date, provider)
+    rows = compute_hypothetical_positions(
+        config, target_date, provider, include_closed=True,
+    )
 
     if not rows:
         st.info("当前无假设持仓 — active 策略最近的信号均已平仓 (或从未触发买入)")
@@ -537,6 +539,7 @@ def render_position_watch(config, target_date, provider):
             sentiments[symbol] = None
 
     df_display = pd.DataFrame([{
+        "状态": r["status"],
         "标的": r["symbol"],
         "策略": r["strategy"],
         "个股情绪": (
@@ -544,13 +547,13 @@ def render_position_watch(config, target_date, provider):
             f"{sentiments[r['symbol']]['as_of']}"
             if sentiments.get(r["symbol"]) else "数据不足"
         ),
-        "入场日": r["entry_date"],
-        "入场价": f"${r['entry_price']:.2f}",
-        "当前价": f"${r['current_price']:.2f}",
-        "浮盈%": f"{r['pnl_pct']:+.2f}%",
-        "移动止损": f"${r['stop_price']:.2f}",
-        "距止损%": f"{r['distance_pct']:.2f}%",
-        "持仓天": r["days_held"],
+        "入场日": r["entry_date"] or "—",
+        "入场价": f"${r['entry_price']:.2f}" if r["entry_price"] is not None else "—",
+        "当前价": f"${r['current_price']:.2f}" if r["current_price"] is not None else "—",
+        "浮盈%": f"{r['pnl_pct']:+.2f}%" if r["pnl_pct"] is not None else "—",
+        "移动止损": f"${r['stop_price']:.2f}" if r["stop_price"] is not None else "—",
+        "距止损%": f"{r['distance_pct']:.2f}%" if r["distance_pct"] is not None else "—",
+        "持仓天": r["days_held"] if r["days_held"] is not None else "—",
     } for r in rows])
     st.dataframe(
         df_display.style.map(sentiment_cell_style, subset=["个股情绪"]),
@@ -558,7 +561,9 @@ def render_position_watch(config, target_date, provider):
         hide_index=True,
     )
 
-    danger = [r for r in rows if r["distance_pct"] < 5]
+    open_rows = [r for r in rows if r["status"] == "持有"]
+    danger = [r for r in open_rows
+              if r["distance_pct"] is not None and r["distance_pct"] < 5]
     if danger:
         for r in danger:
             st.warning(
@@ -566,7 +571,12 @@ def render_position_watch(config, target_date, provider):
                 f"{r['distance_pct']:.2f}% (止损位 ${r['stop_price']:.2f})"
             )
     else:
-        st.success(f"全部 {len(rows)} 个假设持仓距移动止损 ≥ 5%, 暂无减仓预警")
+        if open_rows:
+            st.success(
+                f"全部 {len(open_rows)} 个持有标的距移动止损 ≥ 5%, 暂无减仓预警"
+            )
+        else:
+            st.info(f"当前无持有标的，已展示全部 {len(rows)} 个 watchlist 状态")
 
     st.divider()
 
