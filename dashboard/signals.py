@@ -8,7 +8,12 @@ import streamlit as st
 from utils import get_logger
 from utils.market_state import MarketStateClassifier, MarketRegime, Volatility
 from strategy import SIGNAL_LABEL
-from analysis.risk_monitor import compute_risk_state, compute_symbol_sentiment, RiskLevel
+from analysis.risk_monitor import (
+    compute_china_market_state,
+    compute_risk_state,
+    compute_symbol_sentiment,
+    RiskLevel,
+)
 from data.realtime import get_realtime_vix, get_fear_greed
 from live.position_stops import compute_hypothetical_positions
 from dashboard.sentiment_display import sentiment_markup, sentiment_text, sentiment_cell_style
@@ -70,6 +75,20 @@ def render_risk_light(config, target_date, provider):
     )
     theme = _RISK_THEME[state.level]
 
+    # China is represented only as a broad-market snapshot. The two index
+    # ETFs are inputs to the aggregate and are not exposed as separate rows.
+    try:
+        csi300_df = provider.get_daily("510300", start=start, end=end)
+    except Exception as exc:
+        logger.warning("CSI 300 market-state data fetch failed: %s", exc)
+        csi300_df = pd.DataFrame()
+    try:
+        csi500_df = provider.get_daily("510500", start=start, end=end)
+    except Exception as exc:
+        logger.warning("CSI 500 market-state data fetch failed: %s", exc)
+        csi500_df = pd.DataFrame()
+    china_state = compute_china_market_state(csi300_df, csi500_df)
+
     # Regime / volatility tag — uses the existing MarketStateClassifier
     # so the dashboard surfaces the same regime info that drives
     # SignalGate / StrategyEnsemble internally. Just a label, no extra
@@ -92,8 +111,10 @@ def render_risk_light(config, target_date, provider):
     except Exception as exc:
         logger.debug("regime tag unavailable: %s", exc)
 
-    # Native Streamlit alerts keep the pressure state visually consistent
-    # with the rest of the dashboard and remain readable in dark mode.
+    overall = state.sentiment_score
+    spy_sentiment = state.market_sentiments.get("SPY", {})
+    qqq_sentiment = state.market_sentiments.get("QQQ", {})
+
     stress_text = f"{state.emoji} {theme['label']}"
     if regime_tag:
         stress_text += f"  ·  {regime_tag}"
@@ -105,17 +126,17 @@ def render_risk_light(config, target_date, provider):
     else:
         st.error(stress_text)
 
-    overall = state.sentiment_score
-    spy_sentiment = state.market_sentiments.get("SPY", {})
-    qqq_sentiment = state.market_sentiments.get("QQQ", {})
     st.markdown("**市场情绪温度** · 0 极度超卖 · 50 中性 · 100 极度超买")
-    s1, s2, s3 = st.columns(3)
+    s1, s2, s3, s4 = st.columns(4)
     s1.metric("大盘整体", f"{overall:.1f}" if overall is not None else "—")
     s2.metric("SPY", f"{spy_sentiment.get('score', 0):.1f}" if spy_sentiment.get("score") is not None else "—")
     s3.metric("QQQ", f"{qqq_sentiment.get('score', 0):.1f}" if qqq_sentiment.get("score") is not None else "—")
+    cn_score = china_state.get("sentiment_score")
+    s4.metric("中国大盘整体", f"{cn_score:.1f}" if cn_score is not None else "—")
     _render_sentiment_state(s1, state.sentiment_label)
     _render_sentiment_state(s2, spy_sentiment.get("label", "数据不足"))
     _render_sentiment_state(s3, qqq_sentiment.get("label", "数据不可用"))
+    _render_sentiment_state(s4, china_state.get("sentiment_label", "数据不可用"))
 
     ind = state.indicators
     st.markdown("**市场参考**")

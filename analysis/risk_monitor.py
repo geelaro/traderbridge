@@ -175,6 +175,103 @@ def compute_symbol_sentiment(
     }
 
 
+def compute_china_market_state(
+    csi300_df: pd.DataFrame,
+    csi500_df: pd.DataFrame,
+    params: Optional[dict] = None,
+) -> dict:
+    """Build an independent CN market snapshot from CSI 300 and CSI 500.
+
+    Sentiment uses the shared 0-100 RSI / MA200-extension / 20-day-momentum
+    scale. Stress uses price trend, a fast 5-day drawdown, and annualized
+    20-day realized volatility instead of the US-specific VIX.
+    """
+    p = {**_DEFAULTS, **(params or {})}
+    specs = (
+        ("沪深300", csi300_df),
+        ("中证500", csi500_df),
+    )
+    markets = {}
+    reasons = []
+    for label, df in specs:
+        sentiment = compute_symbol_sentiment(df, p)
+        if sentiment is None:
+            markets[label] = {"available": False, "reasons": [f"{label} 数据不足"]}
+            continue
+
+        close = pd.to_numeric(df["Close"], errors="coerce").dropna().astype(float)
+        ma200 = float(close.rolling(int(p["ma200_period"])).mean().iloc[-1])
+        close_now = float(close.iloc[-1])
+        ret_5d = (close_now / float(close.iloc[-6]) - 1) * 100
+        daily_returns = close.pct_change(fill_method=None).dropna().tail(20)
+        realized_vol = float(daily_returns.std(ddof=1) * (252 ** 0.5) * 100)
+        ma_pct = sentiment["vs_ma200_pct"]
+        label_reasons = []
+
+        if ma_pct < -3:
+            label_reasons.append(f"{label} 跌破 MA200 {abs(ma_pct):.1f}%")
+        if ret_5d < -5:
+            label_reasons.append(f"{label} 5日跌幅 {ret_5d:.1f}%")
+        if realized_vol >= 40:
+            label_reasons.append(f"{label} 20日年化波动率 {realized_vol:.1f}% 偏高")
+
+        if label_reasons:
+            level = RiskLevel.RED
+        elif ma_pct >= 3 and realized_vol < 25 and ret_5d > -3:
+            level = RiskLevel.GREEN
+            label_reasons = [
+                f"{label} 站上 MA200 {ma_pct:+.1f}%",
+                f"{label} 20日年化波动率 {realized_vol:.1f}%",
+            ]
+        else:
+            level = RiskLevel.YELLOW
+            label_reasons = [
+                f"{label} MA200乖离 {ma_pct:+.1f}%",
+                f"{label} 20日年化波动率 {realized_vol:.1f}%",
+            ]
+
+        markets[label] = {
+            "available": True,
+            "level": level.value,
+            "sentiment_score": sentiment["score"],
+            "sentiment_label": sentiment["label"],
+            "indicators": {
+                **sentiment,
+                "close": round(close_now, 2),
+                "ma200": round(ma200, 2),
+                "ret_5d_pct": round(ret_5d, 2),
+                "realized_vol_20d_pct": round(realized_vol, 2),
+            },
+            "reasons": label_reasons,
+        }
+        reasons.extend(label_reasons)
+
+    available = [item for item in markets.values() if item.get("available")]
+    if not available:
+        return {
+            "available": False,
+            "level": RiskLevel.YELLOW.value,
+            "reasons": ["沪深300和中证500数据不足，无法判定中国市场状态"],
+            "markets": markets,
+            "sentiment_score": None,
+            "sentiment_label": "数据不可用",
+        }
+
+    overall_score = round(sum(m["sentiment_score"] for m in available) / len(available), 1)
+    overall_level = max(
+        (RiskLevel(m["level"]) for m in available), key=_LEVEL_RANK.get,
+    )
+    return {
+        "available": True,
+        "level": overall_level.value,
+        "reasons": reasons,
+        "markets": markets,
+        "sentiment_score": overall_score,
+        "sentiment_label": _sentiment_label(overall_score),
+        "as_of": min(m["indicators"]["as_of"] for m in available),
+    }
+
+
 def _top_risk(ma_pct: float, ret_20d: float, rsi: float, p: dict, label: str):
     """Retain the legacy chase-risk fields for compatible consumers."""
     reasons: List[str] = []

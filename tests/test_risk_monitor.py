@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 
 from analysis.risk_monitor import (
+    compute_china_market_state,
     compute_risk_state,
     compute_symbol_sentiment,
     RiskLevel,
@@ -219,6 +220,29 @@ class TestTopRisk:
 
 
 class TestMarketSentiment:
+    def test_china_state_is_one_aggregate_from_two_benchmarks(self):
+        csi300 = _synthetic_spy(np.linspace(300, 500, 300))
+        csi500 = _synthetic_spy(np.linspace(500, 300, 300))
+
+        state = compute_china_market_state(csi300, csi500)
+
+        assert state["available"]
+        assert state["sentiment_score"] == pytest.approx(
+            (state["markets"]["沪深300"]["sentiment_score"]
+             + state["markets"]["中证500"]["sentiment_score"]) / 2,
+        )
+        assert state["sentiment_label"] in {
+            "极度超卖", "超卖", "中性", "超买", "极度超买",
+        }
+        assert set(state["markets"]) == {"沪深300", "中证500"}
+
+    def test_china_state_unavailable_without_enough_history(self):
+        short = _synthetic_spy(np.linspace(300, 400, 100))
+        state = compute_china_market_state(short, pd.DataFrame())
+
+        assert not state["available"]
+        assert state["sentiment_score"] is None
+
     def test_numeric_sentiment_separates_spy_and_qqq(self):
         spy = _synthetic_spy(np.linspace(300, 500, 300))
         qqq = _synthetic_spy(np.linspace(500, 300, 300))
