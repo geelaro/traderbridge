@@ -44,6 +44,7 @@ from utils import get_logger
 from utils.market_state import MarketStateClassifier
 from utils.sectors import DEFAULT_SECTORS
 from utils.signal_gate import SignalGate
+from utils.trade_actions import TradeAction, action_label, has_action
 from dashboard.sentiment_display import sentiment_markup
 
 logger = get_logger("dashboard.decision_summary")
@@ -149,7 +150,7 @@ def _today_signals(config, end_ts, provider, cache, errors):
             config, target_date=end_ts.strftime("%Y-%m-%d"),
             provider=provider, cache=cache,
         )
-        return [r for r in results if r.get("signal", 0) != 0]
+        return [r for r in results if has_action(r)]
     except Exception as exc:
         logger.warning("decision_summary: 今日信号扫描失败: %s", exc)
         errors.append("今日信号数据不可用")
@@ -170,7 +171,11 @@ def _rejected_signals(config, market_state, signals, errors):
         )
         rejected = []
         for sig in signals:
-            if sig["signal"] == 1:
+            if sig.get("action") == TradeAction.OPEN_SHORT:
+                ok, reason = False, "SHORT_ENTRY_RESEARCH_ONLY"
+            elif sig.get("action") in (TradeAction.CLOSE_LONG, TradeAction.CLOSE_SHORT):
+                ok, reason = True, ""
+            elif sig["signal"] == 1:
                 ok, reason = gate.allow_buy(sig, {}, None)
             else:
                 ok, reason = gate.allow_sell(sig)
@@ -359,7 +364,7 @@ def render_decision_summary(summary: dict) -> None:
         with st.expander("信号明细"):
             if summary["signals"]:
                 for s in summary["signals"]:
-                    tag = "买入" if s["signal"] == 1 else "卖出"
+                    tag = action_label(s)
                     sentiment = s.get("symbol_sentiment")
                     line = (
                         f"- {s['symbol']} {s['strategy']}: {tag} "

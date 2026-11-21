@@ -38,6 +38,7 @@ from typing import Dict, List, Optional
 import requests
 
 from utils.logging import get_logger
+from utils.trade_actions import action_label, has_action
 
 logger = get_logger(__name__)
 
@@ -209,23 +210,20 @@ class Notifier:
             YYYY-MM-DD
         """
         buys = [s for s in signals if s["signal"] == 1]
-        sells = [s for s in signals if s["signal"] == -1]
+        groups = {}
+        for signal in signals:
+            if has_action(signal):
+                groups.setdefault(action_label(signal), []).append(signal)
 
-        if not buys and not sells:
-            return self.text(f"[{scan_date}] 今日无买入/卖出信号")
+        if not groups:
+            return self.text(f"[{scan_date}] 今日无开仓/平仓动作")
 
         elements = []
-        if buys:
+        for label, group in groups.items():
             elements.append(self._mk_field(
-                f"买入信号 ({len(buys)})",
+                f"{label}信号 ({len(group)})",
                 "\n".join(f"{s['symbol']}  {self._strat_label(s['strategy'])}  ${s['price']:.2f}"
-                          for s in buys),
-            ))
-        if sells:
-            elements.append(self._mk_field(
-                f"卖出信号 ({len(sells)})",
-                "\n".join(f"{s['symbol']}  {self._strat_label(s['strategy'])}  ${s['price']:.2f}"
-                          for s in sells),
+                          for s in group),
             ))
 
         card = self._mk_card(

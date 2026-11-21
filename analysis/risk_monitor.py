@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
+from math import isfinite
 from typing import List, Optional
 
 import pandas as pd
@@ -69,6 +70,7 @@ class RiskState:
     sentiment_label: str = "unknown"
     sentiment_components: dict = field(default_factory=dict)
     market_sentiments: dict = field(default_factory=dict)
+    directional_risks: dict = field(default_factory=dict)
 
     @property
     def emoji(self) -> str:
@@ -232,6 +234,7 @@ def compute_china_market_state(
 
         markets[label] = {
             "available": True,
+            "directional_risks": compute_directional_risk(df, params=p),
             "level": level.value,
             "sentiment_score": sentiment["score"],
             "sentiment_label": sentiment["label"],
@@ -255,6 +258,7 @@ def compute_china_market_state(
             "markets": markets,
             "sentiment_score": None,
             "sentiment_label": "数据不可用",
+            "directional_risks": _aggregate_directional_risks([]),
         }
 
     overall_score = round(sum(m["sentiment_score"] for m in available) / len(available), 1)
@@ -269,6 +273,89 @@ def compute_china_market_state(
         "sentiment_score": overall_score,
         "sentiment_label": _sentiment_label(overall_score),
         "as_of": min(m["indicators"]["as_of"] for m in available),
+        "directional_risks": _aggregate_directional_risks(
+            [m["directional_risks"] for m in available],
+        ),
+    }
+
+
+def compute_directional_risk(
+    df: pd.DataFrame, vix: Optional[float] = None, params: Optional[dict] = None,
+) -> dict:
+    """Independent long/short research risk, never an entry or liquidation signal.
+
+    Trend opposition, stretched prices and volatility can raise risk for
+    either side. A falling, oversold market can be high risk for BOTH sides.
+    Without VIX, realized 20-day volatility is used (including CN markets).
+    """
+    p = {**_DEFAULTS, **(params or {})}
+    if df is None or df.empty or "Close" not in df.columns:
+        return _aggregate_directional_risks([])
+    close = pd.to_numeric(df["Close"], errors="coerce").dropna().astype(float)
+    values = close.tail(int(p["ma200_period"]) + 20)
+    if not all(isfinite(x) and x > 0 for x in values):
+        return _aggregate_directional_risks([])
+    sentiment = compute_symbol_sentiment(df, p)
+    if sentiment is None:
+        return _aggregate_directional_risks([])
+    extension = sentiment["vs_ma200_pct"]
+    rsi = sentiment["rsi14"]
+    ret5 = (close.iloc[-1] / close.iloc[-6] - 1) * 100
+    vol = float(close.pct_change(fill_method=None).tail(20).std() * 252 ** 0.5 * 100)
+    results = {}
+    for side, sign in (("long", 1), ("short", -1)):
+        rank, reasons = 0, []
+        against = sign * extension < -p["ma_buffer_pct"] * 100
+        if against:
+            rank = 2
+            reasons.append("逆向趋势风险")
+        elif abs(extension) < p["ma_buffer_pct"] * 100:
+            rank = 1
+            reasons.append("接近长期均线，方向未确认")
+        stretched = rsi if side == "long" else 100 - rsi
+        if stretched >= p["rsi_extreme"]:
+            rank = 2
+            reasons.append("极度超买，追多回撤风险" if side == "long" else "极度超卖，追空反弹风险")
+        elif stretched >= p["rsi_overbought"]:
+            rank = max(rank, 1)
+            reasons.append("超买，追多需谨慎" if side == "long" else "超卖，追空需谨慎")
+        if sign * extension >= p["extension_high_pct"]:
+            rank = 2
+            reasons.append("价格偏离长期均线过大")
+        effective_vix = vix if vix is not None and isfinite(vix) and vix > 0 else None
+        high_vol = effective_vix >= p["vix_high"] if effective_vix is not None else vol >= 40
+        elevated_vol = effective_vix >= p["vix_low"] if effective_vix is not None else vol >= 25
+        if high_vol:
+            rank = 2
+            reasons.append("高波动，多空均需防范急剧反向波动")
+        elif elevated_vol:
+            rank = max(rank, 1)
+            reasons.append("波动偏高")
+        if abs(ret5) >= abs(p["crash_5d_pct"]):
+            rank = max(rank, 1)
+            reasons.append("短期价格急变")
+        results[side] = {
+            "level": ("green", "yellow", "red")[rank],
+            "reasons": reasons or ["趋势同向，未触发额外风险项"],
+        }
+    return {"available": True, "as_of": sentiment["as_of"], **results}
+
+
+def _aggregate_directional_risks(items: list[dict]) -> dict:
+    available = [item for item in items if item.get("available")]
+    if not available:
+        return {"available": False, **{
+            side: {"level": "unknown", "reasons": ["数据不足，无法判定"]}
+            for side in ("long", "short")
+        }}
+    ranks = {"green": 0, "yellow": 1, "red": 2}
+    return {
+        "available": True,
+        "as_of": min(item["as_of"] for item in available),
+        **{side: {
+            "level": max((item[side]["level"] for item in available), key=ranks.get),
+            "reasons": list(dict.fromkeys(reason for item in available for reason in item[side]["reasons"])),
+        } for side in ("long", "short")},
     }
 
 
@@ -367,6 +454,7 @@ def _compute_market_detail(df: pd.DataFrame, label: str, vix: float, p: dict) ->
         "available": True, "level": level, "reasons": reasons,
         "indicators": indicators, "top_risk_level": top_level,
         "top_risk_reasons": top_reasons,
+        "directional_risks": compute_directional_risk(df, vix=vix, params=p),
     }
 
 
@@ -459,6 +547,7 @@ def compute_risk_state(
             "indicators": detail["indicators"],
             "sentiment_score": detail["indicators"]["sentiment_score"],
             "sentiment_label": detail["indicators"]["sentiment_label"],
+            "directional_risks": detail["directional_risks"],
         }
         for label, detail in details.items() if detail.get("available")
     }
@@ -469,4 +558,7 @@ def compute_risk_state(
         sentiment_label=overall_label,
         sentiment_components={label: item["components"] for label, item in market_sentiments.items()},
         market_sentiments=market_sentiments,
+        directional_risks=_aggregate_directional_risks(
+            [detail["directional_risks"] for detail in available],
+        ),
     )

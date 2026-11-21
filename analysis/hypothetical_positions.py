@@ -1,11 +1,11 @@
 """Compute hypothetical positions with Chandelier trailing stops.
 
 Pure compute — given a config + a DataProvider, runs each watchlist
-symbol's active single-strategy across history and identifies the most
-recent open simulated buy.  For each open buy, computes:
+symbol's active single-strategy across history and identifies the current
+hypothetical long or short. For each open position, computes:
 
 - entry / current price + PnL%
-- Chandelier-style trailing stop (highest-since-entry minus N · ATR)
+- Direction-aware Chandelier reference stop (not necessarily the strategy exit)
 - distance to stop, days held
 
 The output schema matches what
@@ -32,6 +32,8 @@ Position-dict schema::
         "symbol":         str,
         "strategy":       str,
         "status":         "持有" | "卖出",
+        "direction":      "LONG" | "SHORT" | "FLAT",
+        "action":         str,
         "entry_date":     "YYYY-MM-DD",
         "entry_price":    float,
         "current_price":  float,
@@ -50,6 +52,7 @@ from typing import Iterable, List, Optional
 import pandas as pd
 
 from strategy import STRATEGY_MAP
+from strategy.actions import replay_actions
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +124,8 @@ def compute_hypothetical_positions(
             "symbol": symbol,
             "strategy": strategy,
             "status": "卖出",
+            "direction": "FLAT",
+            "action": "hold",
             "entry_date": None,
             "entry_price": None,
             "current_price": current_price,
@@ -129,6 +134,10 @@ def compute_hypothetical_positions(
             "distance_pct": None,
             "days_held": None,
         }
+
+    def unavailable_row(symbol: str, strategy: str) -> dict:
+        return {**closed_row(symbol, strategy), "status": "数据不可用",
+                "direction": "UNKNOWN", "action": None}
 
     for item in config.get("watchlist", []):
         symbol = item.get("symbol")
@@ -142,7 +151,7 @@ def compute_hypothetical_positions(
         # a single concrete strategy to estimate the Chandelier stop.
         if not isinstance(strat_name, str) or strat_name not in STRATEGY_MAP:
             if include_closed:
-                rows.append(closed_row(symbol, strategy_label))
+                rows.append(unavailable_row(symbol, strategy_label))
             continue
 
         try:
@@ -150,33 +159,50 @@ def compute_hypothetical_positions(
         except Exception as exc:
             logger.debug("position stops fetch failed for %s: %s", symbol, exc)
             if include_closed:
-                rows.append(closed_row(symbol, strategy_label))
+                rows.append(unavailable_row(symbol, strategy_label))
             continue
         if df is None or df.empty:
             if include_closed:
-                rows.append(closed_row(symbol, strategy_label))
+                rows.append(unavailable_row(symbol, strategy_label))
+            continue
+
+        df = df.loc[df.index <= pd.Timestamp(end)]
+        if df.empty:
+            if include_closed:
+                rows.append(unavailable_row(symbol, strategy_label))
             continue
 
         params = config.get("strategy", {}).get(strat_name, {})
         try:
             strategy = STRATEGY_MAP[strat_name](**params)
             df_sig = strategy.calculate_indicators(df)
+            df_sig = df_sig.loc[df_sig.index <= pd.Timestamp(end)]
+            action_state = replay_actions(strategy, df_sig).iloc[-1]
         except Exception as exc:
             logger.debug("position stops indicators failed for %s/%s: %s",
                          symbol, strat_name, exc)
             if include_closed:
-                rows.append(closed_row(symbol, strategy_label))
+                rows.append(unavailable_row(symbol, strategy_label))
             continue
 
-        idx_entry = _find_open_simulated_trade(df_sig)
-        if idx_entry is None:
+        if action_state["action"] is None:
+            if include_closed:
+                rows.append(unavailable_row(symbol, strategy_label))
+            continue
+        idx_entry = action_state["entry_index"]
+        if pd.isna(idx_entry):
             if include_closed:
                 try:
                     current_price = float(df_sig["Close"].iloc[-1])
                 except (KeyError, IndexError, TypeError, ValueError):
                     current_price = None
-                rows.append(closed_row(symbol, strategy_label, current_price))
+                rows.append({**closed_row(symbol, strategy_label, current_price),
+                             "action": action_state["action"]})
             continue
+
+        idx_entry = int(idx_entry)
+        direction = "LONG" if action_state["position_after"] > 0 else "SHORT"
+        sign = 1 if direction == "LONG" else -1
 
         try:
             entry_date = df_sig.index[idx_entry]
@@ -188,6 +214,8 @@ def compute_hypothetical_positions(
                 rows.append({
                     **closed_row(symbol, strategy_label),
                     "status": "持有",
+                    "direction": direction,
+                    "action": action_state["action"],
                 })
             continue
         if atr <= 0 or entry_price <= 0:
@@ -195,26 +223,35 @@ def compute_hypothetical_positions(
                 rows.append({
                     **closed_row(symbol, strategy_label, current_price),
                     "status": "持有",
+                    "direction": direction,
+                    "action": action_state["action"],
                 })
             continue
 
-        track_col = "High" if "High" in df_sig.columns else "Close"
+        track_col = "High" if direction == "LONG" else "Low"
+        if track_col not in df_sig.columns:
+            track_col = "Close"
         try:
-            highest = float(df_sig[track_col].iloc[idx_entry:].max())
+            prices = df_sig[track_col].iloc[idx_entry:]
+            extreme = float(prices.max() if direction == "LONG" else prices.min())
         except (KeyError, ValueError):
             continue
 
         trail_mult = float(getattr(strategy.params, "trail_atr_mult", 2.5))
-        stop_price = highest - trail_mult * atr
+        if strat_name == "turtle_trading":
+            atr = float(df_sig["ATR"].iloc[max(0, idx_entry - 1)])
+        stop_price = extreme - sign * trail_mult * atr
 
-        pnl_pct = (current_price / entry_price - 1) * 100
-        dist_pct = (current_price - stop_price) / current_price * 100 if current_price > 0 else 0
+        pnl_pct = sign * (current_price / entry_price - 1) * 100
+        dist_pct = sign * (current_price - stop_price) / current_price * 100 if current_price > 0 else 0
         days_held = (df_sig.index[-1] - entry_date).days
 
         rows.append({
             "symbol": symbol,
             "strategy": strat_name,
             "status": "持有",
+            "direction": direction,
+            "action": action_state["action"],
             "entry_date": entry_date.date().isoformat(),
             "entry_price": entry_price,
             "current_price": current_price,

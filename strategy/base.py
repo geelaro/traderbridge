@@ -92,11 +92,12 @@ class BaseStrategy(ABC):
     Subclass contract
     -----------------
     1. `calculate_indicators(df)` — return `df` with indicator columns AND
-       a `'Signal'` column (1 = long entry, -1 = exit, 0 = hold).
+       a `'Signal'` column (1 = bullish, -1 = bearish, 0 = neutral).
+       The action depends on the current position and `long_only`.
     2. `min_bars` — how many bars must elapse before the first signal fires.
 
     Optional overrides (sensible defaults provided):
-    3. `check_exit(...)` — exit conditions (default: Signal == -1)
+    3. `check_exit(...)` — exit conditions (default: opposite signal)
     4. `position_size(...)` — position sizing (default: 95 % of capital)
     5. `entry_signal(...)` — entry trigger (default: Signal == 1)
 
@@ -194,8 +195,10 @@ class BaseStrategy(ABC):
         with *highest_since_entry* — strategies can ignore one depending on
         the position direction in ``position.get('direction')``.
         """
-        if int(df["Signal"].iloc[i]) == -1:
-            return True, "卖出信号"
+        direction = (position or {}).get("direction", "LONG")
+        exit_signal = 1 if direction == "SHORT" else -1
+        if int(df["Signal"].iloc[i]) == exit_signal:
+            return True, "空头平仓信号" if direction == "SHORT" else "卖出信号"
         return False, ""
 
 

@@ -16,6 +16,7 @@ import pandas as pd
 from data import DataProvider
 from data.cache import CacheManager
 from strategy import STRATEGY_MAP
+from strategy.actions import replay_actions
 from utils import get_logger
 
 logger = get_logger("scanner")
@@ -81,7 +82,10 @@ class SignalScanner:
         # --- watchlist symbols -------------------------------------------------
         for item in config.get("watchlist", []):
             results.extend(
-                self._scan_symbol(item, start, target_date, active_first=monitors)
+                self._scan_symbol(
+                    {**item, "_strategy_params": config.get("strategy", {})},
+                    start, target_date, active_first=monitors,
+                )
             )
 
         # --- orphan positions --------------------------------------------------
@@ -160,10 +164,16 @@ class SignalScanner:
                         symbol, strat_name,
                     )
                 continue
-            strat_params = item.get("params", {})
+            strat_params = item.get("_strategy_params", {}).get(strat_name, {})
+            if strat_name == active_strat:
+                strat_params = {**strat_params, **item.get("params", {})}
             strategy = STRATEGY_MAP[strat_name](**strat_params)
             try:
                 df_sig = strategy.calculate_indicators(df, df_weekly=df_weekly)
+                df_sig = df_sig.loc[df_sig.index <= pd.Timestamp(target_date)]
+                if df_sig.empty:
+                    continue
+                action_state = replay_actions(strategy, df_sig).iloc[-1].to_dict()
             except Exception:
                 logger.exception("策略计算失败: %s %s", symbol, strat_name)
                 continue
@@ -186,11 +196,12 @@ class SignalScanner:
                     scan_date=target_date,
                     symbol=symbol,
                     strategy=strat_name,
-                    bar_date=bar_date,
+                    bar_date=df_sig.index[-1].date().isoformat(),
                     signal=signal,
                     price=price,
                     atr=atr,
-                    indicators=json.dumps(indicators, ensure_ascii=False),
+                    indicators=json.dumps({**indicators, "_action": action_state["action"],
+                                           "_action_reason": action_state["action_reason"]}, ensure_ascii=False),
                 )
 
             results.append({
@@ -198,9 +209,12 @@ class SignalScanner:
                 "name": name,
                 "strategy": strat_name,
                 "signal": signal,
+                **{k: action_state[k] for k in ("action", "action_reason", "position_before", "position_after")},
+                "long_only": strategy.long_only,
+                "position_source": "hypothetical_close",
                 "price": price,
                 "atr": atr,
-                "bar_date": bar_date,
+                "bar_date": df_sig.index[-1].date().isoformat(),
                 "indicators": indicators,
                 "orphan": is_orphan,
             })
@@ -228,7 +242,8 @@ class SignalScanner:
             logger.warning("regime_tags 长度与 members 不匹配: %s", symbol)
             return []
 
-        member_params = item.get("params", {}).get("members", {})
+        member_params = {**item.get("_strategy_params", {}),
+                         **item.get("params", {}).get("members", {})}
         pairs = []
         for strat_name, tag in zip(members, tags):
             cls = _SMAP.get(strat_name)
@@ -243,9 +258,13 @@ class SignalScanner:
             members=pairs, proxy_df=self._proxy_cache, **ep,
         )
         df_sig = ensemble.calculate_indicators(df)
+        df_sig = df_sig.loc[df_sig.index <= pd.Timestamp(target_date)]
+        if df_sig.empty:
+            return []
 
         idx = -1
         signal = int(df_sig["Signal"].iloc[idx])
+        action_state = replay_actions(ensemble, df_sig).iloc[-1].to_dict()
         price = float(df_sig["Close"].iloc[idx])
         atr = float(df_sig["ATR"].iloc[idx]) if "ATR" in df_sig.columns else 0
 
@@ -265,12 +284,16 @@ class SignalScanner:
             self.cache.save_signal(
                 scan_date=target_date, symbol=symbol, strategy="ensemble",
                 bar_date=bar_date, signal=signal, price=price, atr=atr,
-                indicators=json.dumps(indicators, ensure_ascii=False),
+                indicators=json.dumps({**indicators, "_action": action_state["action"],
+                                       "_action_reason": action_state["action_reason"]}, ensure_ascii=False),
             )
 
         return [{
             "symbol": symbol, "name": name, "strategy": "ensemble",
             "signal": signal, "price": price, "atr": atr,
+            **{k: action_state[k] for k in ("action", "action_reason", "position_before", "position_after")},
+            "long_only": ensemble.long_only,
+            "position_source": "hypothetical_close",
             "bar_date": bar_date, "indicators": indicators, "orphan": is_orphan,
         }]
 
@@ -283,7 +306,7 @@ class SignalScanner:
         df = self._data_cache[symbol]
         if df is None or df.empty:
             return None
-        return df
+        return df.loc[df.index <= pd.Timestamp(end)]
 
     def _fetch_weekly(
         self, symbol: str, start: str, end: str

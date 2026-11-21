@@ -145,7 +145,7 @@ def unrealized_pnl_summary(positions: Iterable[dict]) -> dict:
          "shares": int}
 
     Optional keys (passed through to per-symbol output): ``strategy``,
-    ``entry_date``.  Shares default to 1 if missing.
+    ``entry_date``, ``direction``. Shares default to 1 if missing.
 
     Returns
     -------
@@ -177,8 +177,12 @@ def unrealized_pnl_summary(positions: Iterable[dict]) -> dict:
             shares = 0.0
         if not sym or ep <= 0 or cp <= 0 or shares <= 0:
             continue
-        pnl = (cp - ep) * shares
-        pnl_pct = (cp / ep - 1) * 100
+        direction = p.get("direction", "LONG")
+        if direction not in ("LONG", "SHORT"):
+            continue
+        sign = -1 if direction == "SHORT" else 1
+        pnl = sign * (cp - ep) * shares
+        pnl_pct = sign * (cp / ep - 1) * 100
         if pnl > 0:
             n_win += 1
         elif pnl < 0:
@@ -189,6 +193,7 @@ def unrealized_pnl_summary(positions: Iterable[dict]) -> dict:
             "entry_price": ep,
             "current_price": cp,
             "shares": shares,
+            "direction": direction,
             "pnl": pnl,
             "pnl_pct": pnl_pct,
             "strategy": p.get("strategy"),

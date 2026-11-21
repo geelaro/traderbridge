@@ -7,7 +7,7 @@ import streamlit as st
 
 from utils import get_logger
 from utils.market_state import MarketStateClassifier, MarketRegime, Volatility
-from strategy import SIGNAL_LABEL
+from utils.trade_actions import TradeAction, action_label, has_action
 from analysis.risk_monitor import (
     compute_china_market_state,
     compute_risk_state,
@@ -181,6 +181,21 @@ def render_risk_light(config, target_date, provider):
         })
     st.dataframe(pd.DataFrame(market_rows), hide_index=True, use_container_width=True)
 
+    risk_rows = []
+    risk_names = {"green": "低风险", "yellow": "警戒", "red": "高风险", "unknown": "数据不可用"}
+    for label, risks in [
+        ("美股整体", state.directional_risks),
+        *[(symbol, levels.get(symbol, {}).get("directional_risks", {})) for symbol in ("SPY", "QQQ")],
+        ("中国大盘整体", china_state.get("directional_risks", {})),
+    ]:
+        risk_rows.append({"市场": label, **{
+            f"{name}风险": risk_names.get(risks.get(side, {}).get("level", "unknown"), "数据不可用")
+            for side, name in (("long", "多头"), ("short", "空头"))
+        }})
+    st.dataframe(pd.DataFrame(risk_rows).style.map(
+        _directional_risk_style, subset=["多头风险", "空头风险"],
+    ), hide_index=True, use_container_width=True)
+
     with st.expander("查看判定依据与情绪分解"):
         st.markdown("**压力判定**")
         if state.reasons:
@@ -189,6 +204,9 @@ def render_risk_light(config, target_date, provider):
         else:
             st.caption("暂无压力判定依据")
         st.markdown("**情绪分解**")
+        for side, label in (("long", "多头风险"), ("short", "空头风险")):
+            reasons = state.directional_risks.get(side, {}).get("reasons", ["数据不足"])
+            st.markdown(f"**{label}**：" + "；".join(reasons))
         sentiment_rows = []
         for symbol, item in (("SPY", spy_sentiment), ("QQQ", qqq_sentiment)):
             components = item.get("components", {})
@@ -266,7 +284,7 @@ def render_todays_signals(config, target_date, provider, cache):
         results = scan_day(config, target_date=target_date.isoformat(),
                            provider=provider, cache=cache)
 
-        active_signals = [r for r in results if r["signal"] != 0]
+        active_signals = [r for r in results if has_action(r)]
         if active_signals:
             grouped: dict[str, list] = defaultdict(list)
             for r in active_signals:
@@ -282,7 +300,7 @@ def render_todays_signals(config, target_date, provider, cache):
                         (item.get("active", "") for item in config.get("watchlist", [])
                          if item["symbol"] == sym), ""
                     ) else ""
-                    parts.append(f"{s['strategy']}{tag} {SIGNAL_LABEL[s['signal']]}")
+                    parts.append(f"{s['strategy']}{tag} {action_label(s)}")
                 line = f"{sym} @ ${price:.2f}:  " + "  |  ".join(parts)
                 if has_sell:
                     st.error(line)
@@ -291,7 +309,7 @@ def render_todays_signals(config, target_date, provider, cache):
                 else:
                     st.info(line)
         else:
-            st.info("今日无买入/卖出信号")
+            st.info("今日无开仓/平仓动作")
 
     with col2:
         st.subheader("策略分布")
@@ -314,13 +332,20 @@ def render_todays_signals(config, target_date, provider, cache):
 # Per-direction copy used in the detail card. Keeps the rendering function
 # small and lets non-developers tweak the messaging in one place.
 _DIRECTION = {
-    1: {"label": "买入", "color": "#28a745", "icon": "📈",
+    "open_long": {"label": "做多", "color": "#28a745", "icon": "📈",
         "stop_factor": -2.0, "target_factor": 3.0,
         "stop_word": "止损", "target_word": "止盈"},
-    -1: {"label": "卖出", "color": "#dc3545", "icon": "📉",
+    "open_short": {"label": "做空", "color": "#dc3545", "icon": "📉",
          "stop_factor": 2.0, "target_factor": -3.0,
          "stop_word": "止损(空)", "target_word": "止盈(空)"},
 }
+_DIRECTION["close_long"] = {**_DIRECTION["open_long"], "label": "多头平仓"}
+_DIRECTION["close_short"] = {**_DIRECTION["open_short"], "label": "空头平仓"}
+
+
+def _directional_risk_style(value):
+    color = {"低风险": "#198754", "警戒": "#a66b00", "高风险": "#dc3545"}.get(value, "#666666")
+    return f"color: {color}; font-weight: bold"
 
 
 def render_signal_detail(config, target_date, provider, cache):
@@ -340,20 +365,12 @@ def render_signal_detail(config, target_date, provider, cache):
                        provider=provider, cache=cache)
 
     # Summary metrics — always show, even with no signals
-    active = [r for r in results if r["signal"] != 0]
-    n_buys = sum(1 for r in active if r["signal"] == 1)
-    n_sells = sum(1 for r in active if r["signal"] == -1)
-    n_symbols = len({r["symbol"] for r in active})
-    n_watchlist = len(config.get("watchlist", []))
-
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("📈 买入信号", n_buys)
-    m2.metric("📉 卖出信号", n_sells)
-    m3.metric("有信号标的", f"{n_symbols} / {n_watchlist}")
-    m4.metric("总策略×标的", len(results))
+    active = [r for r in results if has_action(r)]
+    for col, action in zip(st.columns(4), _DIRECTION):
+        col.metric(_DIRECTION[action]["label"], sum(r.get("action") == action for r in active))
 
     if not active:
-        st.info("今日无买入/卖出信号 — 等待")
+        st.info("今日无开仓/平仓动作")
         _render_proximity(results, default_expanded=True)
         st.divider()
         return
@@ -379,7 +396,7 @@ def render_signal_detail(config, target_date, provider, cache):
             (s for s in sigs if s["strategy"] == active_map.get(sym, "")),
             sigs[0],
         )
-        direction = primary["signal"]
+        direction = primary.get("action")
         cfg = _DIRECTION.get(direction)
         if cfg is None:
             continue
@@ -413,10 +430,16 @@ def render_signal_detail(config, target_date, provider, cache):
                 )
             else:
                 st.caption("个股情绪：历史行情不足，暂不可判定")
+            risks = primary.get("directional_risk", {})
+            for side, label in (("long", "多头风险"), ("short", "空头风险")):
+                risk = risks.get(side, {})
+                text = f"{label}：" + "；".join(risk.get("reasons", ["数据不足"]))
+                {"red": st.error, "yellow": st.warning, "green": st.success}.get(risk.get("level"), st.info)(text)
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("触发价", f"${price:.2f}")
             c2.metric("ATR(14)", f"${atr:.2f}" if atr > 0 else "—")
-            if atr > 0:
+            is_entry = direction in (TradeAction.OPEN_LONG, TradeAction.OPEN_SHORT)
+            if atr > 0 and is_entry:
                 c3.metric(
                     f"建议 {cfg['stop_word']}",
                     f"${stop_price:.2f}",
@@ -427,9 +450,12 @@ def render_signal_detail(config, target_date, provider, cache):
                     f"${target_price:.2f}",
                     f"{target_pct:+.2f}%",
                 )
-            else:
+            elif is_entry:
                 c3.metric(f"建议 {cfg['stop_word']}", "—")
                 c4.metric(f"建议 {cfg['target_word']}", "—")
+            else:
+                c3.metric("策略动作", cfg["label"])
+                c4.metric("触发原因", primary.get("action_reason") or "策略退出")
 
             # Indicator snapshot — the strategy's own context, filtered to
             # human-readable values only. Strategy authors put whatever
@@ -455,7 +481,7 @@ def render_signal_detail(config, target_date, provider, cache):
             if others:
                 agree_lines = []
                 for r in others:
-                    sig_label = SIGNAL_LABEL.get(r["signal"], "—")
+                    sig_label = action_label(r)
                     tag = "(active)" if r["strategy"] == active_map.get(sym, "") else "(monitor)"
                     agree_lines.append(f"{r['strategy']} {tag}: {sig_label}")
                 st.markdown("**其它策略观察**: " + "  ·  ".join(agree_lines))
@@ -534,8 +560,7 @@ def render_position_watch(config, target_date, provider):
     """
     st.subheader("假设持仓监控")
     st.caption(
-        "展示全部 watchlist：按 active 策略最近一次未平 buy 信号判断持有状态，"
-        "并用 Chandelier 移动止损估算距离. 仅用于减仓预警, 不替代实盘持仓数据."
+        "收盘价假设持仓 · 多空双向 · 非实盘持仓"
     )
 
     rows = compute_hypothetical_positions(
@@ -560,7 +585,8 @@ def render_position_watch(config, target_date, provider):
             sentiments[symbol] = None
 
     df_display = pd.DataFrame([{
-        "状态": r["status"],
+        "状态": ("多头持有" if r.get("direction", "LONG") == "LONG" else "空头持有") if r["status"] == "持有" else ("空仓" if r["status"] == "卖出" else r["status"]),
+        "今日动作": action_label(r),
         "标的": r["symbol"],
         "策略": r["strategy"],
         "个股情绪": (
@@ -572,7 +598,7 @@ def render_position_watch(config, target_date, provider):
         "入场价": f"${r['entry_price']:.2f}" if r["entry_price"] is not None else "—",
         "当前价": f"${r['current_price']:.2f}" if r["current_price"] is not None else "—",
         "浮盈%": f"{r['pnl_pct']:+.2f}%" if r["pnl_pct"] is not None else "—",
-        "移动止损": f"${r['stop_price']:.2f}" if r["stop_price"] is not None else "—",
+        "参考止损": f"${r['stop_price']:.2f}" if r["stop_price"] is not None else "—",
         "距止损%": f"{r['distance_pct']:.2f}%" if r["distance_pct"] is not None else "—",
         "持仓天": r["days_held"] if r["days_held"] is not None else "—",
     } for r in rows])

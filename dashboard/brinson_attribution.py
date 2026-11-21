@@ -75,15 +75,18 @@ def render_brinson_attribution(config: dict, target_date: date, provider):
     # ── Build portfolio symbols + weights ──────────────────────────
     if "假设持仓" in source:
         rows = compute_hypothetical_positions(config, target_date, provider)
-        symbols = [r["symbol"] for r in rows] if rows else []
-        if not symbols:
+        short_count = sum(r.get("direction") == "SHORT" for r in rows)
+        if short_count:
+            st.info(f"Brinson 归因暂不支持空头权重，已排除 {short_count} 个假设空头")
+        symbols = [r["symbol"] for r in rows if r.get("direction", "LONG") == "LONG"]
+        if not symbols and not rows:
             symbols = [item["symbol"] for item in config.get("watchlist", [])]
             st.info("无假设持仓 — 自动回退到等权 watchlist")
     else:
         symbols = [item["symbol"] for item in config.get("watchlist", [])]
 
     if not symbols:
-        st.warning("watchlist 为空")
+        st.warning("没有可计算的多头标的")
         return
 
     st.write(f"组合: **{len(symbols)}** 个标的, 等权")

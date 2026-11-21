@@ -38,7 +38,7 @@ class OrderManager:
     def generate_orders(
         self, signals: List[dict], positions: Dict[str, any], account
     ) -> List[Order]:
-        """Generate orders from signals — long, short, cover, all supported.
+        """Generate long entries and position closes; short entries are research-only.
 
         Four-way signal/position matrix:
 
@@ -47,13 +47,12 @@ class OrderManager:
         ======= ============ ==========================
          1       flat          BUY → open long
          1       short (<0)    BUY → cover short
-        -1       flat          SELL → open short
+        -1       flat          blocked (short research only)
         -1       long (>0)     SELL → close long
         ======= ============ ==========================
 
         Close orders (SELL for long exit / BUY for short cover) are
-        generated first.  Open orders (BUY for long / SELL for short)
-        are then batch-allocated with equal-risk capital split.
+        generated first. Long openings are then allocated from cash.
         """
         orders = []
 
@@ -100,9 +99,8 @@ class OrderManager:
                 )
                 orders.append(self.execution_model.to_broker_order(plan))
 
-        # ---- Phase 2: collect open candidates (long + short) ------------------
+        # ---- Phase 2: collect long entry candidates ----------------------------
         candidates_long = []
-        candidates_short = []
         for sym, sig in symbol_signals.items():
             if sig.get("orphan"):
                 continue
@@ -118,15 +116,16 @@ class OrderManager:
                 candidates_long.append((sym, sig))
 
             elif sig["signal"] == -1 and not has_position:
-                ok, reason = self.gate.allow_sell(sig)
-                if not ok:
-                    print(f"  ! {sym} {reason}，跳过")
-                    self.cache.log_ops("gate_reject", symbol=sym, detail=reason, level="WARN")
-                    continue
-                candidates_short.append((sym, sig))
+                # Short research signals must never open a broker position.
+                # In particular, a long-only exit signal is not a short entry.
+                self.cache.log_ops(
+                    "gate_reject", symbol=sym,
+                    detail="SHORT_ENTRY_RESEARCH_ONLY", level="INFO",
+                )
+                continue
 
         # ---- Phase 3: batch equal-risk allocation for all open orders --------
-        total_candidates = len(candidates_long) + len(candidates_short)
+        total_candidates = len(candidates_long)
         if total_candidates > 0:
             avail = getattr(account, "available_cash", account.total_equity)
             capital_per = avail / total_candidates
@@ -145,26 +144,6 @@ class OrderManager:
                     plan = self.execution_model.make_plan(
                         symbol=sym, side=OrderSide.BUY,
                         quantity=qty, created_index=0,
-                    )
-                    orders.append(self.execution_model.to_broker_order(plan))
-                else:
-                    print(f"  ! {sym} 风控未通过，跳过")
-
-            for sym, sig in candidates_short:
-                sig["_qty"] = self.risk_ctrl.calc_position_size(
-                    capital=capital_per, price=sig.get("price", 0),
-                    atr=sig.get("atr", 0), last_price=sig.get("price", 0),
-                    total_equity=account.total_equity,
-                )
-                if sig["_qty"] <= 0:
-                    print(f"  ! {sym} 做空信号仓位为0，跳过")
-                    continue
-                qty = self.gate.vol_scaled_qty(sig["_qty"])
-                if self.risk_ctrl.passes_risk(sig, qty, account):
-                    plan = self.execution_model.make_plan(
-                        symbol=sym, side=OrderSide.SELL,
-                        quantity=qty, created_index=0,
-                        reason="short_entry",
                     )
                     orders.append(self.execution_model.to_broker_order(plan))
                 else:

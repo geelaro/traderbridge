@@ -542,7 +542,11 @@ def _build_weights(config, target_date, provider, source: str) -> dict:
     if "假设持仓" in source:
         rows = compute_hypothetical_positions(config, target_date, provider)
         if rows:
-            return {r["symbol"]: 1.0 for r in rows}
+            short_count = sum(r.get("direction") == "SHORT" for r in rows)
+            if short_count:
+                st.info(f"组合风险分析暂不支持空头权重，已排除 {short_count} 个假设空头")
+            return {r["symbol"]: 1.0 for r in rows
+                    if r.get("direction", "LONG") == "LONG"}
         # fall through to watchlist if no open positions
     return {item["symbol"]: 1.0 for item in config.get("watchlist", [])}
 

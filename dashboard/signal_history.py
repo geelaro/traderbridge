@@ -32,9 +32,11 @@ import streamlit as st
 
 from data.protocol import classify_symbol
 from strategy import STRATEGY_MAP
+from utils.trade_actions import ACTION_LABELS, action_label, has_action, restore_action
 
 _WINDOW_OPTIONS = {"7天": 7, "30天": 30, "90天": 90, "180天": 180, "365天": 365, "全部": None}
-_DIR_OPTIONS = {"全部": None, "买入": 1, "卖出": -1}
+_DIR_OPTIONS = {"全部": None, **{label: action.value for action, label in ACTION_LABELS.items()},
+                "买入(旧记录)": "legacy_buy", "卖出(旧记录)": "legacy_sell"}
 _DIR_ICON = {1: "📈 买入", -1: "📉 卖出", 0: "—"}
 
 
@@ -68,17 +70,23 @@ def render_signal_history(cache, config):
         st.info("signal_history 表为空 — 打开过\"今日信号\"或跑过 daily.py 之后才会有数据")
         return
 
-    df = pd.DataFrame(rows)
+    records = []
+    for row in rows:
+        record = restore_action(row)
+        records.append({**record, "action": record.get("action") or
+                        {1: "legacy_buy", -1: "legacy_sell", 0: "hold"}.get(row["signal"], "hold"),
+                        "action_label": action_label(record), "has_action": has_action(record)})
+    df = pd.DataFrame(records)
 
     if only_nonzero:
-        df = df[df["signal"] != 0]
+        df = df[df["has_action"]]
     if symbol_choice != "全部":
         df = df[df["symbol"] == symbol_choice]
     if strategy_choice != "全部":
         df = df[df["strategy"] == strategy_choice]
     direction = _DIR_OPTIONS[direction_choice]
     if direction is not None:
-        df = df[df["signal"] == direction]
+        df = df[df["action"] == direction]
 
     if df.empty:
         st.info("当前筛选条件下无匹配记录")
@@ -89,7 +97,7 @@ def render_signal_history(cache, config):
     # collapse repeated daily re-confirmations of the same underlying bar.
     # ------------------------------------------------------------------
     grouped = (
-        df.groupby(["symbol", "strategy", "bar_date", "signal"])
+        df.groupby(["symbol", "strategy", "bar_date", "signal", "action", "action_label"])
         .agg(
             price=("price", "last"),
             atr=("atr", "last"),
@@ -102,13 +110,13 @@ def render_signal_history(cache, config):
         .sort_values("bar_date", ascending=False)
     )
 
-    n_buy = int((grouped["signal"] == 1).sum())
-    n_sell = int((grouped["signal"] == -1).sum())
+    n_buy = int(grouped["action"].isin(["open_long", "open_short"]).sum())
+    n_sell = int(grouped["action"].isin(["close_long", "close_short"]).sum())
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("信号事件数(去重后)", len(grouped))
     m2.metric("覆盖标的数", grouped["symbol"].nunique())
-    m3.metric("📈 买入事件", n_buy)
-    m4.metric("📉 卖出事件", n_sell)
+    m3.metric("开仓事件", n_buy)
+    m4.metric("平仓事件", n_sell)
 
     def _fmt_price(row):
         if pd.isna(row["price"]):
@@ -120,7 +128,7 @@ def render_signal_history(cache, config):
         "K线日期": grouped["bar_date"],
         "标的": grouped["symbol"],
         "策略": grouped["strategy"],
-        "方向": grouped["signal"].map(_DIR_ICON),
+        "方向": grouped["action_label"],
         "价格": grouped.apply(_fmt_price, axis=1),
         "ATR": grouped["atr"].map(lambda v: f"{v:.2f}" if pd.notna(v) else "—"),
         "首次探测": grouped["first_seen"],
@@ -134,7 +142,7 @@ def render_signal_history(cache, config):
     # ------------------------------------------------------------------
     with st.expander("查看原始指标快照 (调试用)"):
         options = [
-            f"{r.bar_date}  {r.symbol}  {r.strategy}  {_DIR_ICON.get(r.signal, r.signal)}"
+            f"{r.bar_date}  {r.symbol}  {r.strategy}  {r.action_label}"
             for r in grouped.itertuples()
         ]
         sel = st.selectbox("选一条", options) if options else None

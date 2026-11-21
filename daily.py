@@ -19,11 +19,11 @@ import pandas as pd
 
 from data import DataProvider
 from data.cache import CacheManager
-from analysis.risk_monitor import compute_symbol_sentiment
-from strategy import SIGNAL_LABEL
+from analysis.risk_monitor import compute_symbol_sentiment, compute_directional_risk
 from utils import get_logger, load_toml
 from utils.notify import Notifier
 from utils.signal_scanner import SignalScanner
+from utils.trade_actions import action_label, has_action
 
 logger = get_logger("daily")
 
@@ -77,14 +77,18 @@ def scan_day(
         df = provider.get_daily(sym, start=(
             pd.Timestamp(target_date) - pd.DateOffset(years=lookback)
         ).strftime("%Y-%m-%d"), end=target_date)
+        if df is not None:
+            df = df.loc[df.index <= pd.Timestamp(target_date)]
         if df is None or df.empty:
             for signal in results_by_symbol[sym]:
                 signal["symbol_sentiment"] = None
             continue
 
         sentiment = compute_symbol_sentiment(df)
+        directional_risk = compute_directional_risk(df)
         for signal in results_by_symbol[sym]:
             signal["symbol_sentiment"] = sentiment
+            signal["directional_risk"] = directional_risk
 
         latest = df.index[-1]
         age_days = (pd.Timestamp(target_date) - latest).days
@@ -114,8 +118,8 @@ def scan_day(
 
         signal_lines = []
         for r in group:
-            label = SIGNAL_LABEL.get(r["signal"], str(r["signal"]))
-            if r["signal"] != 0:
+            label = action_label(r)
+            if has_action(r):
                 is_active = r["strategy"] == active_strat if isinstance(active_strat, str) else r["strategy"] == "ensemble"
                 tag = " ★" if is_active else "  "
                 signal_lines.append(
@@ -139,6 +143,16 @@ def scan_day(
 
 def print_summary(results: list[dict]):
     """Print a compact summary — one row per symbol, buy/sell columns with wrapping."""
+
+    if any("action" in r for r in results):
+        active_actions = [r for r in results if has_action(r)]
+        print("\n  策略动作（收盘价假设持仓，非交易指令）")
+        for r in active_actions:
+            print(f"  {r['symbol']:<10} {r['strategy']:<24} "
+                  f"{action_label(r):<8} {r['price']:.2f}")
+        if not active_actions:
+            print("  今日无开仓/平仓动作")
+        return
 
     grouped: dict[str, dict] = {}
     for r in results:
@@ -207,7 +221,7 @@ def show_history(cache: CacheManager = None, days: int = 7):
     print(f"  {'日期':<12} {'标的':<8} {'策略':<22} {'信号':<6} {'价格':>8}")
     print(f"  {'─' * 56}")
     for r in rows:
-        label = SIGNAL_LABEL.get(r["signal"], "?")
+        label = action_label(r)
         print(f"  {r['scan_date']:<12} {r['symbol']:<8} {r['strategy']:<22} {label:<6} {r['price']:>8.2f}")
     print()
 
@@ -246,7 +260,7 @@ def main():
 
     if args.notify and results:
         notifier = Notifier()
-        signals_with_signal = [r for r in results if r["signal"] != 0]
+        signals_with_signal = [r for r in results if has_action(r)]
         if signals_with_signal:
             notifier.signal_card(signals_with_signal)
 

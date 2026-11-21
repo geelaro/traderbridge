@@ -160,7 +160,7 @@ class TestSignalScannerMissingData:
         results = scanner.scan(minimal_config, target_date="2025-01-01")
         for r in results:
             assert "signal" in r
-            assert r["signal"] in (0, 1)
+            assert r["signal"] in (-1, 0, 1)
             assert r["price"] > 0
             assert r["atr"] >= 0
 

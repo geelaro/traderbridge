@@ -150,11 +150,13 @@ class TestGenerateOrders:
         assert len(orders) == 0
 
     def test_short_entry_when_no_position(self, order_mgr, account):
-        """Signal=-1 with flat position → open short (SELL)."""
+        """Short research signals never open a broker position."""
         signals = [{"symbol": "AAPL", "signal": -1, "price": 195.0, "atr": 5.0, "strategy": "turtle_trading"}]
         orders = order_mgr.generate_orders(signals, {}, account)
-        assert len(orders) == 1
-        assert orders[0].side == OrderSide.SELL
+        assert orders == []
+        order_mgr.cache.log_ops.assert_called_with(
+            "gate_reject", symbol="AAPL", detail="SHORT_ENTRY_RESEARCH_ONLY", level="INFO",
+        )
 
     def test_no_sell_when_long_only_strategy(self, order_mgr, account):
         """Long-only strategy with signal=-1 on long position → close long."""

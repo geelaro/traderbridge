@@ -129,6 +129,7 @@ def render_pnl_breakdown(config: dict, target_date: date, provider, cache):
             "入场日": r.get("entry_date") or "—",
             "入场价": f"${r['entry_price']:.2f}",
             "现价": f"${r['current_price']:.2f}",
+            "方向": "空头" if r.get("direction") == "SHORT" else "多头",
             "股数": int(r["shares"]),
             "浮盈": f"${r['pnl']:+,.0f}",
             "浮盈%": f"{r['pnl_pct']:+.2f}%",
