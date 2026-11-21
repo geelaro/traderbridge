@@ -32,15 +32,21 @@ def _app():
         render_position_watch(config, pd.Timestamp("2025-12-30"), provider)
 
 
-def test_four_action_and_directional_risk_render():
+def test_four_action_and_original_market_state_layout():
     app = AppTest.from_function(_app).run(timeout=30)
     assert not app.exception
     metrics = {m.label: m.value for m in app.metric}
     for label in ("做多", "做空", "多头平仓", "空头平仓"):
         assert metrics[label] == "1"
-    risk_tables = [t.value for t in app.dataframe if "多头风险" in t.value.columns]
-    assert len(risk_tables) == 1
-    assert "空头风险" in risk_tables[0].columns
+    market_tables = [
+        t.value for t in app.dataframe
+        if {"市场", "压力", "情绪"}.issubset(t.value.columns)
+    ]
+    assert len(market_tables) == 1
+    assert market_tables[0]["市场"].tolist() == ["SPY", "QQQ"]
+    assert not any("多头风险" in t.value.columns for t in app.dataframe)
+    labels = [metric.label for metric in app.metric]
+    assert labels.index("中国大盘整体") == labels.index("QQQ") + 1
     positions = [t.value for t in app.dataframe if "今日动作" in t.value.columns][0]
     assert positions.iloc[0]["状态"] == "空头持有"
     assert positions.iloc[0]["浮盈%"] == "+9.09%"

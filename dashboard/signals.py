@@ -181,21 +181,6 @@ def render_risk_light(config, target_date, provider):
         })
     st.dataframe(pd.DataFrame(market_rows), hide_index=True, use_container_width=True)
 
-    risk_rows = []
-    risk_names = {"green": "低风险", "yellow": "警戒", "red": "高风险", "unknown": "数据不可用"}
-    for label, risks in [
-        ("美股整体", state.directional_risks),
-        *[(symbol, levels.get(symbol, {}).get("directional_risks", {})) for symbol in ("SPY", "QQQ")],
-        ("中国大盘整体", china_state.get("directional_risks", {})),
-    ]:
-        risk_rows.append({"市场": label, **{
-            f"{name}风险": risk_names.get(risks.get(side, {}).get("level", "unknown"), "数据不可用")
-            for side, name in (("long", "多头"), ("short", "空头"))
-        }})
-    st.dataframe(pd.DataFrame(risk_rows).style.map(
-        _directional_risk_style, subset=["多头风险", "空头风险"],
-    ), hide_index=True, use_container_width=True)
-
     with st.expander("查看判定依据与情绪分解"):
         st.markdown("**压力判定**")
         if state.reasons:
@@ -204,9 +189,6 @@ def render_risk_light(config, target_date, provider):
         else:
             st.caption("暂无压力判定依据")
         st.markdown("**情绪分解**")
-        for side, label in (("long", "多头风险"), ("short", "空头风险")):
-            reasons = state.directional_risks.get(side, {}).get("reasons", ["数据不足"])
-            st.markdown(f"**{label}**：" + "；".join(reasons))
         sentiment_rows = []
         for symbol, item in (("SPY", spy_sentiment), ("QQQ", qqq_sentiment)):
             components = item.get("components", {})
@@ -341,11 +323,6 @@ _DIRECTION = {
 }
 _DIRECTION["close_long"] = {**_DIRECTION["open_long"], "label": "多头平仓"}
 _DIRECTION["close_short"] = {**_DIRECTION["open_short"], "label": "空头平仓"}
-
-
-def _directional_risk_style(value):
-    color = {"低风险": "#198754", "警戒": "#a66b00", "高风险": "#dc3545"}.get(value, "#666666")
-    return f"color: {color}; font-weight: bold"
 
 
 def render_signal_detail(config, target_date, provider, cache):
