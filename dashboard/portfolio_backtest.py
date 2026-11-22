@@ -222,7 +222,7 @@ def _render_pnl_attribution(pf_result, pf_strategy):
         by_sym_detail["总PnL"] = by_sym_detail["总PnL"].round(0).astype(int)
         by_sym_detail["平均PnL"] = by_sym_detail["平均PnL"].round(0).astype(int)
         by_sym_detail["胜率"] = by_sym_detail["胜率"].round(1)
-        st.dataframe(by_sym_detail, use_container_width=True)
+        st.dataframe(by_sym_detail, width="stretch")
 
     with col_right:
         st.caption("按月份")
@@ -252,7 +252,7 @@ def _render_pnl_attribution(pf_result, pf_strategy):
             by_mo_detail["胜率"] = by_mo_detail["胜率"].round(1)
             by_mo_detail["月均PnL"] = by_mo_detail["月均PnL"].round(2)
             by_mo_detail["累计PnL"] = by_mo_detail["累计PnL"].round(0).astype(int)
-            st.dataframe(by_mo_detail, use_container_width=True)
+            st.dataframe(by_mo_detail, width="stretch")
 
     st.caption("贡献源 & 拖累源")
     c1, c2 = st.columns(2)
@@ -323,7 +323,7 @@ def _render_drawdown_attribution(pf_result):
             "Peak → Trough": f"{peak} → {trough}",
             "深度": f"{ep['depth_pct']:.1f}% (${ep['depth_usd']:+,.0f})",
             "天数": ep["duration_to_trough"],
-            "恢复天数": (ep["duration_to_recovery"]
+            "恢复天数": (str(ep["duration_to_recovery"])
                        if ep["duration_to_recovery"] is not None else "仍在 DD"),
             "交易笔数": ep["n_trades_in_window"],
             "↓ 最大拖累": (f"{top_loser['symbol']} ${top_loser['pnl']:+,.0f}"
@@ -332,7 +332,7 @@ def _render_drawdown_attribution(pf_result):
                           if top_gainer and top_gainer["pnl"] > 0 else "—"),
         })
     st.dataframe(pd.DataFrame(summary_rows), hide_index=True,
-                 use_container_width=True)
+                 width="stretch")
 
     # ── Per-episode drill-down (expander) ──────────────────────
     for i, ep in enumerate(episodes):
@@ -352,7 +352,7 @@ def _render_drawdown_attribution(pf_result):
                             if r["contribution_pct"] is not None else "—"),
             } for r in ep["by_symbol"]]
             st.dataframe(pd.DataFrame(rows), hide_index=True,
-                         use_container_width=True)
+                         width="stretch")
             if abs(ep["unexplained_usd"]) > abs(ep["depth_usd"]) * 0.1:
                 st.caption(
                     f"⚠ 未解释部分 ${ep['unexplained_usd']:+,.0f} — "
@@ -429,7 +429,7 @@ def _render_trade_details(pf_result, pf_strategy):
         st.metric("筛选PnL合计", f"${filtered_pnl:+,.0f}")
 
     display_cols = ["方向", "标的", "入场日", "出场日", "数量", "入场价", "出场价", "PnL", "PnL%", "原因", "持仓天"]
-    st.dataframe(df_filtered[display_cols], use_container_width=True, hide_index=True, height=400)
+    st.dataframe(df_filtered[display_cols], width="stretch", hide_index=True, height=400)
 
 
 def render_monte_carlo(strategy_options, symbols, target_date):

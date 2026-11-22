@@ -183,7 +183,7 @@ def render_brinson_attribution(config: dict, target_date: date, provider):
         "交互效应": [f"{v * 100:+.3f}pp" for v in df["interaction"]],
         "合计": [f"{v * 100:+.3f}pp" for v in df["total"]],
     })
-    st.dataframe(display, hide_index=True, use_container_width=True)
+    st.dataframe(display, hide_index=True, width="stretch")
 
     # ── Top-3 sector contributions ─────────────────────────────────
     df_sorted = df.sort_values("total", ascending=False)

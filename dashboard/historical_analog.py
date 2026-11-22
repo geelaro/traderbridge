@@ -82,7 +82,7 @@ def render_historical_analog(selected_symbol, target_date, provider):
     st.dataframe(
         summary.style.format("{:.2f}", subset=num_cols),
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
     )
 
     st.markdown(f"#### 跟今日最相似的 top {top_n} 次")
@@ -95,7 +95,7 @@ def render_historical_analog(selected_symbol, target_date, provider):
     }
     st.dataframe(
         top_events.style.format(fmt, na_rep="—"),
-        use_container_width=True,
+        width="stretch",
     )
 
     if today_tag != "OTHER":
@@ -121,7 +121,7 @@ def render_historical_analog(selected_symbol, target_date, provider):
                     "均值%": "{:+.2f}", "中位%": "{:+.2f}", "胜率%": "{:.1f}",
                 }),
                 hide_index=True,
-                use_container_width=True,
+                width="stretch",
             )
             if len(tag_events) < 10:
                 st.caption(

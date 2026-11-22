@@ -90,7 +90,7 @@ def render_pnl_breakdown(config: dict, target_date: date, provider, cache):
         with st.expander(f"按标的分解 ({len(by_sym)} 个)"):
             rows = [{"标的": s, "Realized PnL": f"${v:+,.0f}"}
                     for s, v in by_sym.items()]
-            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
     if realized["trades"]:
         with st.expander(f"明细交易 ({len(realized['trades'])} 笔, 最新在前)"):
@@ -106,7 +106,7 @@ def render_pnl_breakdown(config: dict, target_date: date, provider, cache):
                     "PnL": f"${t['pnl']:+,.0f}",
                     "PnL%": f"{t['pnl_pct']:+.2f}%",
                 })
-            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
     st.divider()
 
@@ -134,7 +134,7 @@ def render_pnl_breakdown(config: dict, target_date: date, provider, cache):
             "浮盈": f"${r['pnl']:+,.0f}",
             "浮盈%": f"{r['pnl_pct']:+.2f}%",
         })
-    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
 
 # ---------------------------------------------------------------------------

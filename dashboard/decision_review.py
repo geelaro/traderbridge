@@ -108,7 +108,7 @@ def render_decision_review(cache):
         order = [k for k in ["green", "yellow", "red"] if k in by_light.index]
         by_light = by_light.reindex(order) if order else by_light
         by_light.index = [f"{_RISK_LIGHT_EMOJI.get(k, '⚪')} {k}" for k in by_light.index]
-        st.dataframe(by_light, use_container_width=True)
+        st.dataframe(by_light, width="stretch")
     else:
         st.caption("风险灯字段未填充 — RiskAlerter 尚未在持久化 alert:last_risk_level")
 
@@ -155,7 +155,7 @@ def render_decision_review(cache):
                 })
             if rows:
                 st.dataframe(pd.DataFrame(rows), hide_index=True,
-                             use_container_width=True)
+                             width="stretch")
                 st.caption(
                     "解读: 如果 RED 灯下的胜率显著低于 GREEN, 说明你的决策框架"
                     "在压力期失灵 — 考虑加严风控. 反之, 如果 RED 下胜率反而高, "
@@ -182,7 +182,7 @@ def render_decision_review(cache):
             "理由": (r["reason"] or "")[:60],
         })
     st.dataframe(pd.DataFrame(display_rows),
-                 hide_index=True, use_container_width=True)
+                 hide_index=True, width="stretch")
 
     # ── Selected-row payload expander ──────────────────────────────
     with st.expander("查看原始 payload (调试用)"):

@@ -135,7 +135,7 @@ def render_signal_history(cache, config):
         "最近确认": grouped["last_confirmed"],
         "确认天数": grouped["confirmations"],
     })
-    st.dataframe(display_df, use_container_width=True, hide_index=True)
+    st.dataframe(display_df, width="stretch", hide_index=True)
 
     # ------------------------------------------------------------------
     # Raw indicators expander — look up the latest row for a chosen event.

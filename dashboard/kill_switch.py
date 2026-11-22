@@ -79,7 +79,7 @@ def render_kill_switch(broker, risk_ctrl, notifier, cache):
             "浮盈": f"${p.unrealized_pnl:+,.0f}",
         } for p in positions if p.quantity != 0]
         if rows:
-            st.dataframe(rows, hide_index=True, use_container_width=True)
+            st.dataframe(rows, hide_index=True, width="stretch")
         else:
             st.info("无持仓 — 触发 Kill Switch 不会下任何单(只会 pause daemon)")
     else:
@@ -167,6 +167,6 @@ def _render_recent_history(cache):
         logger.debug("Kill Switch history fetch failed: %s", exc)
 
     if rows:
-        st.dataframe(rows, hide_index=True, use_container_width=True)
+        st.dataframe(rows, hide_index=True, width="stretch")
     else:
         st.caption("无历史记录")

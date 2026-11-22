@@ -84,7 +84,7 @@ def _render_live_trades(cache):
                     "PnL%": f"{t['pnl_pct']:+.1f}%",
                     "日期": t["exit_date"],
                 })
-            st.dataframe(rows, use_container_width=True, hide_index=True)
+            st.dataframe(rows, width="stretch", hide_index=True)
             total_pnl = sum(t["pnl"] for t in trades)
             st.metric("合计 PnL", f"${total_pnl:+,.0f}")
         else:
@@ -147,7 +147,7 @@ def _render_ops_health(cache):
                     "时间": o[0], "来源": source, "级别": level,
                     "事件": event, "标的": symbol, "详情": detail, "值": value,
                 })
-            st.dataframe(rows, use_container_width=True, hide_index=True)
+            st.dataframe(rows, width="stretch", hide_index=True)
         else:
             st.info("暂无运行事件")
 
@@ -177,7 +177,7 @@ def _render_source_health(cache):
                 "最近失败详情": s["last_failure_detail"] or "—",
                 "冷却中": "是" if s["in_cooldown"] else "否",
             })
-        st.dataframe(rows, use_container_width=True, hide_index=True)
+        st.dataframe(rows, width="stretch", hide_index=True)
 
 
 def _render_data_quality(config, provider):
@@ -213,4 +213,4 @@ def _render_data_quality(config, provider):
         if not rows:
             st.info("无可用数据")
             return
-        st.dataframe(rows, use_container_width=True, hide_index=True)
+        st.dataframe(rows, width="stretch", hide_index=True)

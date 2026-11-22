@@ -100,7 +100,7 @@ def render_risk_analytics(config: dict, target_date, provider):
             ])
             st.dataframe(
                 exp_df[["行业", "占比"]],
-                hide_index=True, use_container_width=True,
+                hide_index=True, width="stretch",
             )
 
     st.divider()
@@ -148,7 +148,7 @@ def render_risk_analytics(config: dict, target_date, provider):
                 "ES (Historical)": f"{cvar * 100:.2f}%" if cvar > 0 else "—",
                 "EVT ES": f"{evt_row.get('evt_es', 0) * 100:.2f}%" if evt_row.get("evt_es", 0) > 0 and np.isfinite(evt_row.get("evt_es", 0)) else "—",
             })
-        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
         if evt.get("warning"):
             st.warning(evt["warning"])
@@ -197,7 +197,7 @@ def render_risk_analytics(config: dict, target_date, provider):
                                      if hist_val > 0 else "—"),
                 })
         st.dataframe(pd.DataFrame(fwd_rows), hide_index=True,
-                     use_container_width=True)
+                     width="stretch")
         st.caption(
             "解读: Historical 用整段历史样本(滞后); EWMA 用近期波动率("
             "RiskMetrics λ=0.94, 半衰期 ~11 天); GJR-GARCH 还捕捉**杠杆效应**"
@@ -241,7 +241,7 @@ def render_risk_analytics(config: dict, target_date, provider):
                                else " ✓")),
                     })
                 st.dataframe(pd.DataFrame(cov_rows), hide_index=True,
-                             use_container_width=True)
+                             width="stretch")
                 st.caption(
                     "✓ = 通过 (p > 0.05), ✗ = 拒绝 (模型不合格). "
                     "Kupiec 拒绝 = 实际频率与声称不符; "
@@ -278,7 +278,7 @@ def render_risk_analytics(config: dict, target_date, provider):
                 "最大回撤": f"{dd:.2f}%" if pd.notna(dd) else "—",
                 "覆盖": f"{n_used}/{n_used + missing}",
             })
-        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
         st.caption(
             "解读: 把**当前等权组合**应用到当时的标的日收益序列, "
             "假设当时就持有这个组合. 数据不足的场景说明部分标的当时还没上市. "
@@ -358,7 +358,7 @@ def _render_correlation_section(prices: pd.DataFrame, weights: dict):
                 })
             st.dataframe(
                 pd.DataFrame(cluster_rows),
-                hide_index=True, use_container_width=True,
+                hide_index=True, width="stretch",
             )
             st.caption(
                 f"**洞察**: 你以为有 {n_syms} 个独立仓位, 实际只有 {n_clusters} 个独立赌注. "
@@ -404,7 +404,7 @@ def _render_risk_decomposition(prices: pd.DataFrame, weights: dict):
         "Component VaR": [f"{v:.3f}%" for v in df["cvar_pct"]],
         "风险贡献%": [f"{v:.1f}%" for v in df["rc_pct"]],
     })
-    st.dataframe(df_display, hide_index=True, use_container_width=True)
+    st.dataframe(df_display, hide_index=True, width="stretch")
 
     # Bar chart: risk contribution %
     chart_df = df[["rc_pct"]].rename(columns={"rc_pct": "风险贡献 %"})
@@ -475,7 +475,7 @@ def _render_what_if(prices: pd.DataFrame, weights: dict):
             "Before": fmt(comparison["before"][metric]),
             "After": fmt(comparison["after"][metric]),
         })
-    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
     # Weight diff table
     weight_rows = []
@@ -497,7 +497,7 @@ def _render_what_if(prices: pd.DataFrame, weights: dict):
         with st.expander(f"权重变化 ({len(weight_rows)} 个)"):
             st.dataframe(
                 pd.DataFrame(weight_rows),
-                hide_index=True, use_container_width=True,
+                hide_index=True, width="stretch",
             )
 
 

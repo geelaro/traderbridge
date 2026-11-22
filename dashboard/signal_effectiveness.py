@@ -155,7 +155,7 @@ def render_signal_effectiveness(
             "min": f"{s.min*100:+.1f}%",
             "max": f"{s.max*100:+.1f}%",
         })
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
     # -------------------------------------------------------------------
     # Distribution histograms (one per horizon)
@@ -194,7 +194,7 @@ def render_signal_effectiveness(
     with st.expander(f"信号原始表格 ({len(fr)} 条)", expanded=False):
         st.dataframe(
             (fr * 100).round(2).rename(columns={h: f"{h}d %" for h in fr.columns}),
-            use_container_width=True,
+            width="stretch",
         )
 
     st.caption(

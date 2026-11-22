@@ -146,7 +146,7 @@ def render_factor_attribution(
             "p-value": f"{result.beta_pvalues[name]:.3f}",
             "显著性": "✓" if abs(result.beta_tstats[name]) >= 2 else "—",
         })
-    st.dataframe(pd.DataFrame(table), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(table), width="stretch", hide_index=True)
 
     # -------------------------------------------------------------------
     # Contribution decomposition
@@ -163,7 +163,7 @@ def render_factor_attribution(
             annual_pct.style.format("{:+.2f}").background_gradient(
                 cmap="RdYlGn", axis=None
             ),
-            use_container_width=True,
+            width="stretch",
         )
 
     # -------------------------------------------------------------------

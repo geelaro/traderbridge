@@ -126,7 +126,7 @@ def render_single_backtest(selected_symbol, selected_strategy, backtest_years,
                                 "原因": t.exit_reason,
                                 "持仓天": t.holding_days,
                             })
-                        st.dataframe(pd.DataFrame(trade_rows), use_container_width=True, hide_index=True)
+                        st.dataframe(pd.DataFrame(trade_rows), width="stretch", hide_index=True)
                     else:
                         st.info("无交易记录")
             else:
@@ -215,7 +215,7 @@ def _render_risk_adjusted_section(result):
                     "至谷底天数": int(ep["duration_to_trough_days"]) if not pd.isna(ep["duration_to_trough_days"]) else "-",
                     "回本天数": int(ep["duration_to_recovery_days"]) if not pd.isna(ep["duration_to_recovery_days"]) else "-",
                 })
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
 
 def _render_signal_history_and_comparison(selected_symbol, start, end, provider, cache):
@@ -230,7 +230,7 @@ def _render_signal_history_and_comparison(selected_symbol, start, end, provider,
             df_hist["signal_label"] = df_hist["signal"].map({1: "买入", -1: "卖出", 0: "—"})
             st.dataframe(
                 df_hist[["scan_date", "symbol", "strategy", "signal_label", "price"]].tail(20),
-                use_container_width=True, hide_index=True,
+                width="stretch", hide_index=True,
             )
         else:
             st.info("近 7 天无信号记录")
@@ -271,4 +271,4 @@ def _render_signal_history_and_comparison(selected_symbol, start, end, provider,
 
         if compare_data:
             df_comp = pd.DataFrame(compare_data).sort_values("Sharpe", ascending=False)
-            st.dataframe(df_comp, use_container_width=True, hide_index=True)
+            st.dataframe(df_comp, width="stretch", hide_index=True)

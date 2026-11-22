@@ -179,7 +179,7 @@ def render_risk_light(config, target_date, provider):
             "20日": f"{ind.get(f'{prefix}_20d_return_pct', 0):+.2f}%" if ind.get(f"{prefix}_20d_return_pct") is not None else "—",
             "RSI14": f"{ind.get(f'{prefix}_rsi14', 0):.1f}" if ind.get(f"{prefix}_rsi14") is not None else "—",
         })
-    st.dataframe(pd.DataFrame(market_rows), hide_index=True, use_container_width=True)
+    st.dataframe(pd.DataFrame(market_rows), hide_index=True, width="stretch")
 
     with st.expander("查看判定依据与情绪分解"):
         st.markdown("**压力判定**")
@@ -198,7 +198,7 @@ def render_risk_light(config, target_date, provider):
                 "MA200乖离贡献": f"{components.get('ma200_extension', 0):.1f}" if components else "—",
                 "20日动量贡献": f"{components.get('momentum_20d', 0):.1f}" if components else "—",
             })
-        st.dataframe(pd.DataFrame(sentiment_rows), hide_index=True, use_container_width=True)
+        st.dataframe(pd.DataFrame(sentiment_rows), hide_index=True, width="stretch")
 
     st.divider()
 
@@ -450,7 +450,7 @@ def render_signal_detail(config, target_date, provider, cache):
                     rows = []
                     for k, v in ind_items[:8]:
                         rows.append({"指标": k, "数值": f"{v:.4g}"})
-                    st.dataframe(pd.DataFrame(rows), use_container_width=True,
+                    st.dataframe(pd.DataFrame(rows), width="stretch",
                                  hide_index=True)
 
             # Other strategies monitoring this symbol — agreement check
@@ -581,7 +581,7 @@ def render_position_watch(config, target_date, provider):
     } for r in rows])
     st.dataframe(
         df_display.style.map(sentiment_cell_style, subset=["个股情绪"]),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -690,5 +690,5 @@ def render_alert_history(cache, days: int = 30):
         "类型": _ALERT_TYPE_LABEL.get(r["alert_type"], r["alert_type"]),
         "详情": _format_alert_detail(r["alert_type"], r["payload"]),
     } for r in rows]
-    st.dataframe(pd.DataFrame(display_rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(display_rows), width="stretch", hide_index=True)
     st.divider()
